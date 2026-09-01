@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Parsing · partial-server{% endblock %}
+{% block heading %}⚙️ Parsing{% endblock %}
+{% block subheading %}Pick the documents to parse. Checking a folder takes everything inside it.{% endblock %}
+
+{% block actions %}
+  <span id="tree-selection" class="toolbar-count">Nothing selected</span>
+{% endblock %}
+
+{% block content %}
+  <div class="card tree-card">
+    <div class="tree-head">
+      <span class="tree-head-label">📚 Corpus</span>
+      <span class="tree-badges" id="tree-root-badges" data-total="{{ total }}">
+        {% if failed %}<span class="pill fail">✗ {{ "{:,}".format(failed) }}</span>{% endif %}
+        <span class="pill total">{{ "{:,}".format(total) }}</span>
+        <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
+      </span>
+    </div>
+
+    <ul class="tree tree-children" id="tree-root">
+      {% include "parsing/_partials/level.html" %}
+    </ul>
+  </div>
+
+  {#- The viewer pop-up, same as on the documents list. -#}
+  <div id="modal"></div>
+
+  <script src="{{ url_for('static', path='js/viewer-modal.js') }}" defer></script>
+  <script src="{{ url_for('static', path='js/tree.js') }}" defer></script>
+{% endblock %}
