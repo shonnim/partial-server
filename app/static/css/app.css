@@ -1,0 +1,368 @@
+/* partial-server admin panel — dense, legible, no build step. */
+
+:root {
+  --bg: #f5f6fa;
+  --panel: #ffffff;
+  --sidebar: #161b2e;
+  --sidebar-hover: #222944;
+  --sidebar-active: #2f6bff;
+  --ink: #1a1f36;
+  --ink-soft: #5b6478;
+  --ink-faint: #8b93a7;
+  --line: #e4e7ef;
+  --accent: #2f6bff;
+  --accent-soft: #eaf0ff;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(20, 26, 51, .06), 0 8px 24px rgba(20, 26, 51, .05);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.5 "Pretendard", -apple-system, "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; text-decoration: none; }
+
+/* ---------- shell ---------- */
+
+.shell { display: flex; min-height: 100vh; }
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 244px;
+  height: 100vh;
+  padding: 20px 14px;
+  background: var(--sidebar);
+  color: #cfd5e6;
+}
+
+.brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 22px; }
+.brand-mark { font-size: 26px; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.2; }
+.brand-text strong { color: #fff; font-size: 16px; letter-spacing: .2px; }
+.brand-text small { color: #7e88a5; font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
+
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav-label {
+  margin: 6px 8px 8px;
+  color: #6b7492;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  color: #cfd5e6;
+  font-weight: 500;
+  transition: background .12s ease, color .12s ease;
+}
+.nav-item:hover { background: var(--sidebar-hover); color: #fff; }
+.nav-item.is-active { background: var(--sidebar-active); color: #fff; box-shadow: 0 6px 16px rgba(47, 107, 255, .35); }
+.nav-icon { width: 20px; text-align: center; font-size: 15px; }
+.nav-text { flex: 1; }
+.sidebar-foot {
+  margin-top: auto;
+  padding: 10px 12px;
+  color: #6b7492;
+  font-size: 11px;
+}
+.dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #35d07f;
+  box-shadow: 0 0 0 3px rgba(53, 208, 127, .18);
+}
+
+/* ---------- main ---------- */
+
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+.topbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 28px 18px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.topbar h1 { margin: 0; font-size: 20px; letter-spacing: -.2px; }
+.subheading { margin: 4px 0 0; color: var(--ink-soft); font-size: 13px; }
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
+
+.content { padding: 22px 28px 40px; }
+
+/* ---------- cards / stats ---------- */
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.stat { display: flex; align-items: center; gap: 12px; padding: 14px 16px; }
+.stat-icon {
+  display: grid; place-items: center;
+  width: 40px; height: 40px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  font-size: 19px;
+}
+.stat-value { font-size: 20px; font-weight: 700; letter-spacing: -.3px; }
+.stat-label { color: var(--ink-soft); font-size: 12px; }
+
+.placeholder { padding: 56px 24px; text-align: center; }
+.placeholder-emoji { font-size: 44px; }
+.placeholder h2 { margin: 12px 0 6px; font-size: 17px; }
+.placeholder p { margin: 0 auto; max-width: 460px; color: var(--ink-soft); }
+
+/* ---------- toolbar ---------- */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+
+.field { position: relative; display: flex; align-items: center; }
+.field .field-icon { position: absolute; left: 10px; font-size: 13px; opacity: .6; pointer-events: none; }
+
+input[type="search"], select {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+input[type="search"] { width: 300px; padding-left: 30px; }
+input[type="search"]:focus, select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.toolbar-spacer { flex: 1; }
+.toolbar-count { color: var(--ink-soft); font-size: 12.5px; white-space: nowrap; }
+.toolbar-count strong { color: var(--ink); }
+
+.htmx-request .spinner { visibility: visible; }
+.spinner {
+  visibility: hidden;
+  width: 14px; height: 14px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- table ---------- */
+
+.table-wrap { overflow-x: auto; border-radius: var(--radius) var(--radius) 0 0; }
+
+table.docs {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--panel);
+  font-size: 13px;
+}
+
+table.docs th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 10px 14px;
+  background: #fafbfe;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .7px;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+table.docs td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+table.docs tbody tr:hover { background: #f8faff; }
+
+.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.id-chip {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #f0f2f8;
+  color: var(--ink-soft);
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  letter-spacing: .5px;
+}
+
+.path {
+  display: block;
+  max-width: 340px;
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filename { display: flex; align-items: center; gap: 8px; }
+.filename-text {
+  display: block;
+  max-width: 400px;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color .12s ease, background .12s ease, color .12s ease;
+}
+.btn:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.btn[disabled], .btn.is-disabled {
+  border-color: var(--line);
+  background: #f6f7fb;
+  color: var(--ink-faint);
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.btn.ghost { border-color: transparent; background: transparent; }
+
+.empty { padding: 48px 20px; color: var(--ink-soft); text-align: center; }
+.empty-emoji { display: block; margin-bottom: 8px; font-size: 32px; }
+
+/* ---------- pager ---------- */
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 0 0 var(--radius) var(--radius);
+  color: var(--ink-soft);
+  font-size: 12.5px;
+}
+.pager-controls { display: flex; align-items: center; gap: 6px; }
+.pager-page { padding: 0 8px; font-variant-numeric: tabular-nums; }
+
+/* ---------- viewer ---------- */
+
+/* Metadata beside the PDF on the standalone viewer page. The pop-up on the
+   list uses none of this — it shows the PDF alone. */
+.viewer-layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 16px;
+  min-height: 0;
+}
+.viewer-page { height: calc(100vh - 190px); min-height: 520px; }
+.viewer-meta { padding: 16px; overflow-y: auto; }
+.viewer-meta h3 { margin: 0 0 12px; font-size: 13px; letter-spacing: .4px; text-transform: uppercase; color: var(--ink-soft); }
+.meta-row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px dashed var(--line); }
+.meta-row:last-child { border-bottom: none; }
+.meta-key { color: var(--ink-soft); font-size: 12px; }
+.meta-val { font-size: 12.5px; font-weight: 600; text-align: right; word-break: break-all; }
+.viewer-frame { overflow: hidden; height: 100%; min-height: 0; }
+.viewer-frame iframe { display: block; width: 100%; height: 100%; border: 0; }
+
+/* ---------- modal ---------- */
+
+/* The pop-up holds the PDF and a slim bar to close it — nothing else, so the
+   document gets the whole dialog. */
+dialog.modal {
+  width: min(1400px, 96vw);
+  max-width: none;
+  height: 92vh;
+  max-height: none;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 26px 70px rgba(20, 26, 51, .32);
+  overflow: hidden;
+}
+dialog.modal[open] { display: flex; flex-direction: column; }
+dialog.modal::backdrop { background: rgba(16, 20, 38, .55); }
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.modal-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-pdf {
+  display: block;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+}
+
+@media (max-width: 1100px) {
+  .viewer-layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .sidebar { flex-basis: 68px; padding: 20px 8px; }
+  .brand-text, .nav-text, .nav-label, .sidebar-foot { display: none; }
+  .nav-item { justify-content: center; }
+}

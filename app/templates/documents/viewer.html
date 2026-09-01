@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}{{ doc.filename }} · partial-server{% endblock %}
+{% block heading %}👁️ {{ doc.filename }}{% endblock %}
+{% block subheading %}{{ doc.s3_key|folder_path }}{% endblock %}
+
+{% block actions %}
+  <a class="btn" href="{{ url_for('document_file', document_id=doc.id) }}" target="_blank" rel="noopener">↗️ Open raw</a>
+  <a class="btn" href="{{ url_for('documents_page') }}">← Back to list</a>
+{% endblock %}
+
+{% block content %}
+  {#- Standalone page, reached by deep link or a modified click on View. The
+      pop-up shows only the PDF, so the metadata lives here. -#}
+  <div class="viewer-page viewer-layout">
+    <aside class="card viewer-meta">
+      <h3>Document</h3>
+      <div class="meta-row">
+        <span class="meta-key">ID</span>
+        <span class="meta-val"><span class="id-chip" title="{{ doc.id }}">{{ doc.id|short_id }}</span></span>
+      </div>
+      <div class="meta-row">
+        <span class="meta-key">Category</span>
+        <span class="meta-val">{{ doc.category or "—" }}</span>
+      </div>
+      <div class="meta-row">
+        <span class="meta-key">Size</span>
+        <span class="meta-val">{{ doc.size_bytes|filesize }}</span>
+      </div>
+      <div class="meta-row">
+        <span class="meta-key">Pages</span>
+        <span class="meta-val">{{ doc.pages if doc.pages is not none else "—" }}</span>
+      </div>
+      <div class="meta-row">
+        <span class="meta-key">Bucket</span>
+        <span class="meta-val">{{ doc.bucket }}</span>
+      </div>
+      <div class="meta-row">
+        <span class="meta-key">Object key</span>
+        <span class="meta-val">{{ doc.s3_key }}</span>
+      </div>
+    </aside>
+
+    <div class="card viewer-frame">
+      <iframe src="{{ url_for('document_file', document_id=doc.id) }}#view=FitH"
+              title="{{ doc.filename }}"></iframe>
+    </div>
+  </div>
+{% endblock %}

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}partial-server{% endblock %}</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}">
+  <script src="{{ url_for('static', path='js/htmx.min.js') }}" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">📚</span>
+        <span class="brand-text">
+          <strong>partial</strong>
+          <small>ingestion control</small>
+        </span>
+      </div>
+
+      <nav class="nav">
+        <p class="nav-label">Workspace</p>
+        {% for item in nav_items %}
+          <a class="nav-item {{ 'is-active' if item.key == active_nav }}" href="{{ item.url }}">
+            <span class="nav-icon">{{ item.icon }}</span>
+            <span class="nav-text">{{ item.label }}</span>
+          </a>
+        {% endfor %}
+      </nav>
+
+      <div class="sidebar-foot">
+        <span class="dot"></span> connected
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>{% block heading %}{% endblock %}</h1>
+          <p class="subheading">{% block subheading %}{% endblock %}</p>
+        </div>
+        <div class="topbar-actions">{% block actions %}{% endblock %}</div>
+      </header>
+
+      <div class="content">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+</body>
+</html>

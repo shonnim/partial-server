@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Documents · partial-server{% endblock %}
+{% block heading %}📄 Documents{% endblock %}
+{% block subheading %}Every registered source PDF, newest first.{% endblock %}
+
+{% block content %}
+  <form class="card toolbar"
+        hx-get="{{ url_for('documents_table') }}"
+        hx-target="#doc-table"
+        hx-swap="outerHTML"
+        hx-trigger="input from:#q delay:350ms, change from:#category, submit"
+        hx-indicator="#toolbar-spinner"
+        onsubmit="return false;">
+    <label class="field">
+      <span class="field-icon">🔍</span>
+      <input id="q" type="search" name="q" value="{{ q or '' }}"
+             placeholder="Search filename or object key…" autocomplete="off">
+    </label>
+
+    <select id="category" name="category" aria-label="Category">
+      <option value="">🗂️ All categories</option>
+      {% for c in categories %}
+        <option value="{{ c }}" {{ 'selected' if c == category }}>{{ c }}</option>
+      {% endfor %}
+    </select>
+
+    <div id="toolbar-spinner" class="spinner"></div>
+    <div class="toolbar-spacer"></div>
+    <div id="doc-count" class="toolbar-count">
+      {% include "documents/_partials/count.html" %}
+    </div>
+  </form>
+
+  {% include "documents/_partials/table.html" %}
+
+  {#- The View button swaps the viewer <dialog> in here. -#}
+  <div id="modal"></div>
+
+  <script>
+    // A plain click on View opens the viewer in the modal; ctrl/cmd/shift and
+    // middle clicks fall through to the href so the full page still opens in a
+    // new tab. The listener is delegated, so it survives a table swap.
+    document.addEventListener("click", (event) => {
+      const link = event.target.closest("a[data-viewer]");
+      if (!link) return;
+      if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return;
+
+      event.preventDefault();
+      htmx.ajax("GET", link.href, { target: "#modal", swap: "innerHTML" });
+    });
+
+    // htmx delivers the viewer as a closed <dialog>; open it on arrival and
+    // throw it away on close so the iframe stops holding on to the PDF.
+    document.body.addEventListener("htmx:afterSwap", (event) => {
+      const container = event.detail.target;
+      if (container.id !== "modal") return;
+
+      const dialog = container.querySelector("dialog");
+      if (!dialog) return;
+
+      dialog.addEventListener("close", () => { container.innerHTML = ""; });
+      dialog.addEventListener("click", (e) => {
+        // A click landing on the dialog itself is a click on the backdrop.
+        if (e.target === dialog || e.target.closest("[data-close-modal]")) dialog.close();
+      });
+      dialog.showModal();
+    });
+  </script>
+{% endblock %}

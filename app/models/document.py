@@ -6,7 +6,7 @@ from sqlalchemy import DateTime, Enum, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from partial_server.db.base import Base
+from app.db import Base
 
 
 class DocumentStage(str, enum.Enum):
@@ -37,6 +37,9 @@ class Document(Base):
     filename: Mapped[str] = mapped_column(Text, nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     content_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    category: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
+    # Page count is a parse result, so it is unknown until PARSING completes.
+    pages: Mapped[int | None] = mapped_column(Integer, nullable=True)
     stage: Mapped[DocumentStage] = mapped_column(
         Enum(DocumentStage, name="document_stage", native_enum=True),
         nullable=False,

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard · partial-server{% endblock %}
+{% block heading %}📊 Dashboard{% endblock %}
+{% block subheading %}Corpus health at a glance.{% endblock %}
+
+{% block content %}
+  <section class="stats">
+    <div class="card stat">
+      <div class="stat-icon">📄</div>
+      <div>
+        <div class="stat-value">{{ "{:,}".format(total_documents) }}</div>
+        <div class="stat-label">Documents registered</div>
+      </div>
+    </div>
+    <div class="card stat">
+      <div class="stat-icon">🗂️</div>
+      <div>
+        <div class="stat-value">{{ "{:,}".format(total_categories) }}</div>
+        <div class="stat-label">Categories</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card placeholder">
+    <div class="placeholder-emoji">🚧</div>
+    <h2>Not built yet</h2>
+    <p>
+      Throughput charts, stage funnel and review backlog land here once the
+      ingestion pipeline produces runs worth charting. Head to
+      <a href="{{ url_for('documents_page') }}" style="color: var(--accent); font-weight: 600;">📄 Documents</a>
+      to work with the corpus.
+    </p>
+  </section>
+{% endblock %}

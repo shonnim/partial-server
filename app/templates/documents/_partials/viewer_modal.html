@@ -1,0 +1,15 @@
+{#
+  The pop-up viewer: the PDF and nothing else. Served to HTMX requests from the
+  list's View button and swapped into #modal, where the page script opens it.
+  Document metadata belongs to the standalone viewer page, not here.
+#}
+<dialog class="modal" aria-label="{{ doc.filename }}">
+  <header class="modal-head">
+    <strong class="modal-title" title="{{ doc.filename }}">👁️ {{ doc.filename }}</strong>
+    <button type="button" class="btn" data-close-modal>✕ Close</button>
+  </header>
+
+  <iframe class="modal-pdf"
+          src="{{ url_for('document_file', document_id=doc.id) }}#view=FitH"
+          title="{{ doc.filename }}"></iframe>
+</dialog>
