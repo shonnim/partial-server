@@ -35,6 +35,7 @@ class Document(Base):
     bucket: Mapped[str] = mapped_column(String(63), nullable=False)
     s3_key: Mapped[str] = mapped_column(Text, nullable=False)
     filename: Mapped[str] = mapped_column(Text, nullable=False)
+    folder_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     content_type: Mapped[str] = mapped_column(String(255), nullable=False)
     category: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
