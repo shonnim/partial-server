@@ -1,0 +1,18 @@
+{#
+  The pop-up parse viewer: one artifact as text and nothing else. Served to
+  HTMX requests from the JSON / MD buttons on the parsing tree and swapped into
+  #modal, where the page script opens it.
+#}
+<dialog class="modal" aria-label="{{ text.artifact.filename }}">
+  <header class="modal-head">
+    <strong class="modal-title" title="{{ text.artifact.key }}">{{ text.artifact.filename }}</strong>
+    <span class="modal-actions">
+      <span class="pill total">{{ text.artifact.size_bytes|filesize }}</span>
+      <a class="btn btn-{{ text.artifact.kind.value }}" target="_blank" rel="noopener"
+         href="{{ url_for('document_parsed_file', document_id=doc.id, kind=text.artifact.kind.value) }}">Raw</a>
+      <button type="button" class="btn" data-close-modal>Close</button>
+    </span>
+  </header>
+
+  {% include "documents/_partials/parsed_body.html" %}
+</dialog>

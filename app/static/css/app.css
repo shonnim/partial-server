@@ -28,6 +28,18 @@
   --fail: #cf5a5a;
   --fail-soft: #fdf0f0;
 
+  /* Button tints. A colour variant only swaps --btn-tint; everything else in
+     .btn is derived from it, so a new variant is two lines. */
+  --tint-pdf: #5b6ef5;
+  --tint-json: #b0741d;
+  --tint-md: #2f9367;
+
+  /* One mono stack, best available first. Ligature-capable faces are listed
+     ahead of the system defaults but nothing is fetched: no build step, no
+     webfont, so an unavailable face just falls through. */
+  --mono: "JetBrains Mono", "Cascadia Code", "Fira Code", "IBM Plex Mono",
+          "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
   --radius: 16px;
   --radius-sm: 10px;
   --shadow: 0 1px 2px rgba(43, 48, 80, .04), 0 10px 30px rgba(43, 48, 80, .06);
@@ -275,7 +287,7 @@ table.docs tbody tr:hover { background: var(--accent-tint); }
   border-radius: 7px;
   background: #f1f3fb;
   color: var(--ink-soft);
-  font-family: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-family: var(--mono);
   font-size: 11.5px;
   letter-spacing: .4px;
 }
@@ -285,7 +297,7 @@ table.docs tbody tr:hover { background: var(--accent-tint); }
   max-width: 250px;
   overflow: hidden;
   color: var(--ink-soft);
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-family: var(--mono);
   font-size: 11.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -303,7 +315,11 @@ table.docs tbody tr:hover { background: var(--accent-tint); }
 
 /* ---------- buttons ---------- */
 
+/* A button carries one tint. The neutral default only reveals it on hover;
+   the .btn-* variants wear it at rest, which is what tells PDF from JSON from
+   MD at a glance in a dense row. */
 .btn {
+  --btn-tint: var(--accent);
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -316,16 +332,17 @@ table.docs tbody tr:hover { background: var(--accent-tint); }
   font: inherit;
   font-size: 12.5px;
   font-weight: 600;
+  letter-spacing: .2px;
   white-space: nowrap;
   cursor: pointer;
   transition: border-color var(--ease), background var(--ease),
               color var(--ease), box-shadow var(--ease);
 }
 .btn:hover {
-  border-color: #c3cbf5;
-  background: var(--accent-soft);
-  color: var(--accent);
-  box-shadow: 0 2px 8px rgba(91, 110, 245, .12);
+  border-color: color-mix(in srgb, var(--btn-tint) 34%, #fff);
+  background: color-mix(in srgb, var(--btn-tint) 8%, #fff);
+  color: var(--btn-tint);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--btn-tint) 18%, transparent);
 }
 .btn[disabled], .btn.is-disabled {
   border-color: var(--line);
@@ -336,6 +353,21 @@ table.docs tbody tr:hover { background: var(--accent-tint); }
   pointer-events: none;
 }
 .btn.ghost { border-color: transparent; background: transparent; }
+
+/* Tinted variants: set the tint, and wear it. */
+.btn-pdf { --btn-tint: var(--tint-pdf); }
+.btn-json { --btn-tint: var(--tint-json); }
+.btn-md { --btn-tint: var(--tint-md); }
+
+.btn-pdf, .btn-json, .btn-md {
+  border-color: color-mix(in srgb, var(--btn-tint) 26%, #fff);
+  background: color-mix(in srgb, var(--btn-tint) 7%, #fff);
+  color: var(--btn-tint);
+}
+.btn-pdf:hover, .btn-json:hover, .btn-md:hover {
+  border-color: color-mix(in srgb, var(--btn-tint) 52%, #fff);
+  background: color-mix(in srgb, var(--btn-tint) 14%, #fff);
+}
 
 .empty { padding: 56px 20px; color: var(--ink-soft); text-align: center; }
 .empty-emoji { display: block; margin-bottom: 10px; font-size: 32px; opacity: .85; }
@@ -455,6 +487,77 @@ dialog.modal::backdrop { background: rgba(30, 35, 66, .46); backdrop-filter: blu
   width: 100%;
   min-height: 0;
   border: 0;
+}
+
+.modal-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+
+/* ---------- parsed output ---------- */
+
+/* The extracted text is the thing being judged, so it gets a plain monospace
+   block, generous line height, and no reflow — wrapping a JSON dump would
+   destroy the structure the reviewer is checking. */
+.parsed-text {
+  flex: 1 1 auto;
+  margin: 0;
+  min-height: 0;
+  padding: 18px 22px 26px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--panel);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-variant-ligatures: none;
+  line-height: 1.7;
+  tab-size: 2;
+  white-space: pre;
+}
+.parsed-text:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: -2px; }
+
+/* JSON is structure: wrapping it would destroy the indentation the reviewer is
+   reading, so it scrolls sideways instead. */
+.parsed-text.is-json { white-space: pre; }
+
+/* Markdown is prose: it wraps, sits in from the edge, and gets the looser
+   measure that makes a long extraction readable rather than merely present. */
+.parsed-text.is-md {
+  padding: 20px 28px 30px 40px;
+  font-size: 13px;
+  line-height: 1.85;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Slim scrollbars, so the text carries the panel and not the chrome. */
+.parsed-text::-webkit-scrollbar { width: 12px; height: 12px; }
+.parsed-text::-webkit-scrollbar-track { background: var(--panel-soft); }
+.parsed-text::-webkit-scrollbar-thumb {
+  border: 3px solid var(--panel-soft);
+  border-radius: 999px;
+  background: #ccd2e8;
+}
+.parsed-text::-webkit-scrollbar-thumb:hover { background: #b3bcdd; }
+.parsed-text::-webkit-scrollbar-corner { background: var(--panel-soft); }
+
+.parsed-error {
+  flex: 0 0 auto;
+  z-index: 1;
+  margin: 0;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--fail-soft);
+  color: var(--fail);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* Standalone page: the card owns the height so the text scrolls inside it. */
+.parsed-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 196px);
+  min-height: 520px;
+  overflow: hidden;
 }
 
 /* ---------- parsing tree ---------- */

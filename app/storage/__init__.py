@@ -1,3 +1,15 @@
-from app.storage.rustfs import ObjectNotFound, open_object
+from app.storage.rustfs import (
+    ObjectNotFound,
+    ObjectSummary,
+    list_objects,
+    open_object,
+    read_object,
+)
 
-__all__ = ["ObjectNotFound", "open_object"]
+__all__ = [
+    "ObjectNotFound",
+    "ObjectSummary",
+    "list_objects",
+    "open_object",
+    "read_object",
+]

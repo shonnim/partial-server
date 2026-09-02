@@ -6,6 +6,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.models.document import Document
 from app.schemas.document import DocumentBulkIn, DocumentBulkOut
 from app.services.documents import (
     DEFAULT_PAGE_SIZE,
@@ -14,6 +15,13 @@ from app.services.documents import (
     list_categories,
     list_documents,
     upsert_documents,
+)
+from app.services.parse_artifacts import (
+    ArtifactKind,
+    ArtifactUnavailable,
+    ParseArtifact,
+    load_artifact_text,
+    resolve_artifact,
 )
 from app.storage import ObjectNotFound, open_object
 from app.templating import templates
@@ -142,3 +150,74 @@ def document_file(
         media_type=doc.content_type or obj.content_type,
         headers=headers,
     )
+
+
+def _artifact_or_404(
+    db: Session, document_id: uuid.UUID, kind: ArtifactKind
+) -> tuple[Document, ParseArtifact]:
+    """The document and its parse output, or a 404 naming what is missing."""
+    doc = get_document(db, document_id)
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "document not found")
+
+    try:
+        return doc, resolve_artifact(db, doc, kind)
+    except ArtifactUnavailable as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+
+@router.get(
+    "/{document_id}/parsed/{kind}/viewer",
+    response_class=HTMLResponse,
+    name="document_parsed_viewer",
+)
+def document_parsed_viewer(
+    request: Request,
+    document_id: uuid.UUID,
+    kind: ArtifactKind,
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """The parsed markdown or JSON for one document, rendered as text."""
+    doc, artifact = _artifact_or_404(db, document_id, kind)
+
+    # Same split as the PDF viewer: a fragment for the pop-up, a full page for
+    # a deep link or a ctrl-click.
+    template = (
+        "documents/_partials/parsed_modal.html"
+        if request.headers.get("hx-request")
+        else "documents/parsed.html"
+    )
+    return templates.TemplateResponse(
+        request,
+        template,
+        {
+            "active_nav": "documents",
+            "doc": doc,
+            "text": load_artifact_text(artifact),
+        },
+    )
+
+
+@router.get("/{document_id}/parsed/{kind}", name="document_parsed_file")
+def document_parsed_file(
+    document_id: uuid.UUID,
+    kind: ArtifactKind,
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """Stream a parse output straight out of RustFS, unformatted."""
+    _doc, artifact = _artifact_or_404(db, document_id, kind)
+
+    try:
+        obj = open_object(artifact.bucket, artifact.key)
+    except ObjectNotFound as exc:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "object missing from storage"
+        ) from exc
+
+    headers = {
+        "Content-Disposition": f"inline; filename*=UTF-8''{quote(artifact.filename)}",
+    }
+    if obj.content_length is not None:
+        headers["Content-Length"] = str(obj.content_length)
+
+    return StreamingResponse(obj.chunks, media_type=artifact.media_type, headers=headers)

@@ -1,0 +1,15 @@
+{#
+  The artifact itself. A failure is stated above the text rather than left to
+  look like an empty file — the whole point of this screen is telling a good
+  parse from a bad one.
+
+  The kind is a class rather than a style: markdown is prose and wraps, JSON is
+  structure and must not.
+#}
+{% if text.error %}
+  <p class="parsed-error">{{ text.error }}</p>
+{% endif %}
+
+{% if text.body is not none %}
+  <pre class="parsed-text is-{{ text.artifact.kind.value }}" tabindex="0">{{ text.body }}</pre>
+{% endif %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}{{ text.artifact.filename }} · partial-server{% endblock %}
+{% block heading %}{{ doc.filename }}{% endblock %}
+{% block subheading %}{{ text.artifact.bucket }}/{{ text.artifact.key }}{% endblock %}
+
+{% block actions %}
+  <a class="btn btn-{{ text.artifact.kind.value }}" target="_blank" rel="noopener"
+     href="{{ url_for('document_parsed_file', document_id=doc.id, kind=text.artifact.kind.value) }}">Open raw</a>
+  <a class="btn btn-pdf" href="{{ url_for('document_viewer', document_id=doc.id) }}">Source PDF</a>
+  <a class="btn" href="{{ url_for('parsing_page') }}">Back to parsing</a>
+{% endblock %}
+
+{% block content %}
+  {#- Standalone page, reached by a deep link or a modified click on the
+      JSON / MD buttons. The pop-up shows the same body without the chrome. -#}
+  <div class="card parsed-page">
+    {% include "documents/_partials/parsed_body.html" %}
+  </div>
+{% endblock %}

@@ -47,6 +47,9 @@ class FileNode:
     size_bytes: int
     pages: int | None
     status: DocumentStatus
+    # Whether a parse run has recorded output for this document, which is what
+    # decides if the JSON / MD buttons on the row do anything.
+    parsed: bool
 
 
 @dataclass(frozen=True)
@@ -137,7 +140,10 @@ def folder_files(
 
     rows = db.execute(
         text(f"""
-            SELECT id, filename, size_bytes, pages, status
+            SELECT id, filename, size_bytes, pages, status,
+                   EXISTS (
+                       SELECT 1 FROM parsed_docs p WHERE p.doc_id = documents.id
+                   ) AS parsed
             FROM documents
             WHERE {predicate}
             ORDER BY filename, id
@@ -153,6 +159,7 @@ def folder_files(
             size_bytes=r.size_bytes,
             pages=r.pages,
             status=DocumentStatus(r.status),
+            parsed=r.parsed,
         )
         for r in rows
     ]

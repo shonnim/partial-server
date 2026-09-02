@@ -17,8 +17,19 @@
         </span>
         <span class="pill total">{{ file.pages if file.pages is not none else '—' }} p</span>
         <span class="pill total">{{ file.size_bytes|filesize }}</span>
-        <a class="btn tree-view" data-viewer
-           href="{{ url_for('document_viewer', document_id=file.id) }}">👁️ View</a>
+        <a class="btn tree-view btn-pdf" data-viewer
+           href="{{ url_for('document_viewer', document_id=file.id) }}">PDF</a>
+        {#- Parse output. Kept in the row but disabled until a run has produced
+            it, so the tree also reads as "what has been parsed so far". -#}
+        {% if file.parsed %}
+          <a class="btn tree-view btn-json" data-viewer
+             href="{{ url_for('document_parsed_viewer', document_id=file.id, kind='json') }}">JSON</a>
+          <a class="btn tree-view btn-md" data-viewer
+             href="{{ url_for('document_parsed_viewer', document_id=file.id, kind='md') }}">MD</a>
+        {% else %}
+          <span class="btn tree-view is-disabled" title="Not parsed yet">JSON</span>
+          <span class="btn tree-view is-disabled" title="Not parsed yet">MD</span>
+        {% endif %}
       </span>
     </div>
   </li>

@@ -20,7 +20,7 @@
           <th>📄 Filename</th>
           <th class="num" style="width: 96px;">Size</th>
           <th class="num" style="width: 80px;">Pages</th>
-          <th style="width: 108px;">Viewer</th>
+          <th style="width: 108px;">Source</th>
         </tr>
       </thead>
       <tbody>
@@ -36,8 +36,8 @@
             <td class="num">{{ doc.size_bytes|filesize }}</td>
             <td class="num">{{ doc.pages if doc.pages is not none else "—" }}</td>
             <td>
-              <a class="btn" data-viewer
-                 href="{{ url_for('document_viewer', document_id=doc.id) }}">👁️ View</a>
+              <a class="btn btn-pdf" data-viewer
+                 href="{{ url_for('document_viewer', document_id=doc.id) }}">PDF</a>
             </td>
           </tr>
         {% else %}

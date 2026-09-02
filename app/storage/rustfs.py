@@ -40,6 +40,14 @@ class ObjectStream:
     chunks: Iterator[bytes]
 
 
+@dataclass(frozen=True)
+class ObjectSummary:
+    """One key returned by a listing."""
+
+    key: str
+    size: int
+
+
 @lru_cache
 def get_client() -> Any:
     """Return the shared, thread-safe boto3 S3 client for RustFS."""
@@ -56,6 +64,53 @@ def get_client() -> Any:
     )
 
 
+def _as_missing(exc: ClientError, bucket: str, key: str) -> ObjectNotFound | None:
+    """Translate a ClientError into ObjectNotFound, or None if it is something else."""
+    code = str(exc.response.get("Error", {}).get("Code", ""))
+    return ObjectNotFound(bucket, key) if code in _MISSING_CODES else None
+
+
+def list_objects(bucket: str, prefix: str) -> list[ObjectSummary]:
+    """The objects sitting directly under ``prefix``, subfolders excluded.
+
+    The delimiter is what keeps this cheap: a parse directory holds a handful
+    of text artifacts next to an ``images/`` folder of a hundred page crops,
+    and only the former come back.
+    """
+    try:
+        response = get_client().list_objects_v2(
+            Bucket=bucket, Prefix=prefix, Delimiter="/"
+        )
+    except ClientError as exc:
+        if missing := _as_missing(exc, bucket, prefix):
+            raise missing from exc
+        raise
+
+    return [
+        ObjectSummary(key=o["Key"], size=o["Size"]) for o in response.get("Contents", [])
+    ]
+
+
+def read_object(bucket: str, key: str, *, max_bytes: int) -> tuple[bytes, bool]:
+    """Read a whole object into memory, refusing anything past ``max_bytes``.
+
+    Returns the bytes and whether the object was rejected for being too large.
+    An oversized object comes back empty rather than truncated: half a JSON
+    file is not something to hand on as if it were the file.
+    """
+    try:
+        response = get_client().get_object(Bucket=bucket, Key=key)
+    except ClientError as exc:
+        if missing := _as_missing(exc, bucket, key):
+            raise missing from exc
+        raise
+
+    with response["Body"] as body:
+        if (response.get("ContentLength") or 0) > max_bytes:
+            return b"", True
+        return body.read(), False
+
+
 def open_object(bucket: str, key: str) -> ObjectStream:
     """Open an object for streaming.
 
@@ -65,9 +120,8 @@ def open_object(bucket: str, key: str) -> ObjectStream:
     try:
         response = get_client().get_object(Bucket=bucket, Key=key)
     except ClientError as exc:
-        code = str(exc.response.get("Error", {}).get("Code", ""))
-        if code in _MISSING_CODES:
-            raise ObjectNotFound(bucket, key) from exc
+        if missing := _as_missing(exc, bucket, key):
+            raise missing from exc
         raise
 
     body = response["Body"]

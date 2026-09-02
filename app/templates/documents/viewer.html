@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 
 {% block title %}{{ doc.filename }} · partial-server{% endblock %}
-{% block heading %}👁️ {{ doc.filename }}{% endblock %}
+{% block heading %}{{ doc.filename }}{% endblock %}
 {% block subheading %}{{ doc.s3_key|folder_path }}{% endblock %}
 
 {% block actions %}
-  <a class="btn" href="{{ url_for('document_file', document_id=doc.id) }}" target="_blank" rel="noopener">↗️ Open raw</a>
-  <a class="btn" href="{{ url_for('documents_page') }}">← Back to list</a>
+  <a class="btn" href="{{ url_for('document_file', document_id=doc.id) }}" target="_blank" rel="noopener">Open raw</a>
+  <a class="btn" href="{{ url_for('documents_page') }}">Back to list</a>
 {% endblock %}
 
 {% block content %}
