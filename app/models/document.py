@@ -24,6 +24,14 @@ class DocumentStatus(str, enum.Enum):
     FAILED = "FAILED"
 
 
+class HasHeader(str, enum.Enum):
+    """Whether a document's outline has been extracted into ``headers``."""
+
+    YES = "YES"
+    NO = "NO"
+    UNCHECKED = "UNCHECKED"
+
+
 class Document(Base):
     __tablename__ = "documents"
 
@@ -39,6 +47,11 @@ class Document(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     content_type: Mapped[str] = mapped_column(String(255), nullable=False)
     category: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
+    has_header: Mapped[HasHeader] = mapped_column(
+        Enum(HasHeader, name="document_has_header", native_enum=True),
+        nullable=False,
+        server_default=HasHeader.UNCHECKED.value,
+    )
     # Page count is a parse result, so it is unknown until PARSING completes.
     pages: Mapped[int | None] = mapped_column(Integer, nullable=True)
     stage: Mapped[DocumentStage] = mapped_column(
