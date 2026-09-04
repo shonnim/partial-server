@@ -7,6 +7,9 @@
   <header class="modal-head">
     <strong class="modal-title" title="{{ text.artifact.key }}">{{ text.artifact.filename }}</strong>
     <span class="modal-actions">
+      {% if text.blocks is not none %}
+        <span class="pill total">{{ text.blocks }} blocks</span>
+      {% endif %}
       <span class="pill total">{{ text.artifact.size_bytes|filesize }}</span>
       <a class="btn btn-{{ text.artifact.kind.value }}" target="_blank" rel="noopener"
          href="{{ url_for('document_parsed_file', document_id=doc.id, kind=text.artifact.kind.value) }}">Raw</a>

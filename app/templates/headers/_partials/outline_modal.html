@@ -1,0 +1,57 @@
+{#
+  A document's stored headers, as a tree.
+
+  Depth is carried three ways at once — indentation, a coloured rail down the
+  left, and type weight — because the whole point of this pop-up is to let
+  someone confirm at a glance that a chapter landed under the right unit.
+
+  data-header-count lets the page update the row's Headers button without a
+  reload after an extraction.
+#}
+{% macro branch(nodes) -%}
+  <ul class="outline-list">
+    {% for node in nodes %}
+      <li class="outline-node lvl-{{ node.level if node.level <= 5 else 5 }}">
+        <div class="outline-row">
+          <span class="outline-rail"></span>
+          <span class="outline-title">{{ node.title }}</span>
+          {% if node.start_page is not none %}
+            <span class="pill total outline-page">p. {{ node.start_page }}</span>
+          {% endif %}
+          {% if node.children %}
+            <span class="pill total outline-kids">{{ node.children|length }} ↓</span>
+          {% endif %}
+        </div>
+        {% if node.children %}{{ branch(node.children) }}{% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+{%- endmacro %}
+
+<dialog class="modal modal-narrow" aria-label="Headers"
+        data-doc-id="{{ doc.id }}" data-header-count="{{ total }}">
+  <header class="modal-head">
+    <strong class="modal-title" title="{{ doc.filename }}">{{ doc.filename }}</strong>
+    <span class="modal-actions">
+      {% if saved is not none %}
+        <span class="pill ok">✓ {{ saved }} saved</span>
+      {% endif %}
+      <a class="btn btn-manual" data-viewer
+         href="{{ url_for('header_manual_form', document_id=doc.id) }}">
+        {{ 'Redo' if roots else 'Manual' }}
+      </a>
+      <button type="button" class="btn" data-close-modal>Close</button>
+    </span>
+  </header>
+
+  <div class="outline-body">
+    {% if roots %}
+      {{ branch(roots) }}
+    {% else %}
+      <p class="check-note">
+        No headers stored for this document yet. Use Manual to paste its
+        contents page.
+      </p>
+    {% endif %}
+  </div>
+</dialog>

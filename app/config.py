@@ -19,6 +19,22 @@ class Settings(BaseSettings):
     bucket_documents: str = Field(alias="BUCKET_DOCUMENTS")
     bucket_derived: str = Field(alias="BUCKET_DERIVED")
 
+    # The OpenAI-compatible endpoint used to turn a pasted table of contents
+    # into structured headers. Self-hosted, so the base URL is not optional.
+    llm_base_url: str = Field(alias="LLM_BASE_URL")
+    llm_api_key: str = Field(alias="LLM_API_KEY")
+    llm_model: str = Field(alias="LLM_MODEL")
+    llm_timeout_seconds: float = Field(default=180.0, alias="LLM_TIMEOUT_SECONDS")
+
+    # The document parsing service the Pages method sends a contents page to.
+    # One VLM pass over a few pages is slow, so the timeout is generous.
+    doc_extract_base_url: str = Field(
+        default="https://doc-extract-api.ihopper.co.kr", alias="DOC_EXTRACT_BASE_URL"
+    )
+    doc_extract_timeout_seconds: float = Field(
+        default=600.0, alias="DOC_EXTRACT_TIMEOUT_SECONDS"
+    )
+
     @property
     def sqlalchemy_url(self) -> str:
         """DATABASE_URL with the psycopg (v3) driver made explicit.

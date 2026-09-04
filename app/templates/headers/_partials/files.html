@@ -1,0 +1,74 @@
+{#
+  Document rows for one folder. The header pill is the point of this screen: it
+  shows a verdict only once one has been reached, so an UNCHECKED document
+  reads as "nobody has looked yet" rather than as a negative answer.
+
+  Manual is live only for a document known to have a contents page — pasting an
+  outline for a document that has none would be inventing structure.
+
+  A document that already has headers stored is out of the selection: its box is
+  disabled and its count is on the row. Extraction replaces a document's headers
+  rather than adding to them, so sweeping a stored document into a batch is
+  never what someone meant — re-doing one is a deliberate act, done through its
+  own Manual button.
+#}
+{% for file in level.files %}
+  <li class="tree-node is-file" data-id="{{ file.id }}">
+    <div class="tree-row">
+      <input type="checkbox" class="tree-check" data-kind="file"
+             value="{{ file.id }}" aria-label="Select {{ file.filename }}"
+             {% if file.header_count %}disabled
+             title="{{ file.header_count }} header{{ '' if file.header_count == 1 else 's' }} already stored — use Manual to redo them"{% endif %}>
+      <span class="tree-icon">📄</span>
+      <span class="tree-name" title="{{ file.filename }}">{{ file.filename }}</span>
+      <span class="tree-badges">
+        {#- Rendered on one line: an UNCHECKED document must leave the span
+            genuinely empty so `.has-header:empty` can collapse it. -#}
+        <span class="has-header" data-value="{{ file.has_header.value }}">{% if file.has_header.value == 'YES' %}<span class="pill ok">✓ yes header</span>{% elif file.has_header.value == 'NO' %}<span class="pill total">— no header</span>{% endif %}</span>
+        {#- Same one-line rule as the verdict above: empty means "none stored",
+            and `.header-count:empty` collapses it. -#}
+        <span class="header-count" data-count="{{ file.header_count }}">{% if file.header_count %}<span class="pill headers">{{ file.header_count }} header{{ '' if file.header_count == 1 else 's' }}</span>{% endif %}</span>
+        <span class="pill total">{{ file.size_bytes|filesize }}</span>
+
+        {% if file.has_header.value == 'YES' %}
+          <a class="btn tree-view btn-manual" data-viewer
+             href="{{ url_for('header_manual_form', document_id=file.id) }}">Manual</a>
+        {% else %}
+          <span class="btn tree-view is-disabled"
+                title="Only for a document with a header">Manual</span>
+        {% endif %}
+
+        {#- Always present, so the row is also a way to ask "what did we store
+            for this one?" — the pop-up says so when the answer is nothing. -#}
+        <a class="btn tree-view btn-outline{{ ' is-empty' if not file.header_count }}"
+           data-viewer data-outline
+           title="{{ file.header_count }} header{{ '' if file.header_count == 1 else 's' }} stored"
+           href="{{ url_for('header_outline', document_id=file.id) }}">Headers</a>
+
+        <a class="btn tree-view btn-pdf" data-viewer
+           href="{{ url_for('document_viewer', document_id=file.id) }}">PDF</a>
+        {#- The JSON is what the check reads, so it sits next to the verdict. -#}
+        {% if file.parsed %}
+          <a class="btn tree-view btn-json" data-viewer
+             href="{{ url_for('document_parsed_viewer', document_id=file.id, kind='json') }}">JSON</a>
+          <a class="btn tree-view btn-md" data-viewer
+             href="{{ url_for('document_parsed_viewer', document_id=file.id, kind='md') }}">MD</a>
+        {% else %}
+          <span class="btn tree-view is-disabled" title="Not parsed yet">JSON</span>
+          <span class="btn tree-view is-disabled" title="Not parsed yet">MD</span>
+        {% endif %}
+      </span>
+    </div>
+  </li>
+{% endfor %}
+
+{% if level.remaining_files %}
+  <li class="tree-more">
+    <button type="button" class="btn"
+            hx-get="{{ url_for('headers_nodes') }}?path={{ level.path|urlencode }}&offset={{ level.next_offset }}"
+            hx-target="closest .tree-more"
+            hx-swap="outerHTML">
+      ↓ Load {{ level.remaining_files }} more
+    </button>
+  </li>
+{% endif %}

@@ -1,0 +1,25 @@
+{#
+  The status cell of one queue row after the Pages method ran on it.
+
+  A success says how many headers landed, which PDF pages were read, and how
+  long each half took — the parse and the model call are separate services,
+  and knowing which one is slow is what someone tuning the batch needs.
+
+  data-header-count is what headers.js reads to bring the tree row up to date
+  without a reload, the same attribute the outline pop-up carries.
+#}
+{% if result.ok %}
+  <span class="pill ok" data-doc-id="{{ result.id }}" data-header-count="{{ result.saved }}">
+    ✓ {{ result.saved }} header{{ '' if result.saved == 1 else 's' }}
+  </span>
+  <span class="pill total" title="0-based PDF pages sent to the parser">p. {{ result.start_page }}–{{ result.end_page }}</span>
+  <span class="pill total" title="parse · model">
+    {{ '%.0f'|format(result.parse_seconds) }}s · {{ '%.0f'|format(result.llm_seconds) }}s
+  </span>
+{% else %}
+  <span class="pill fail">✗ failed</span>
+  {% if result.start_page is not none %}
+    <span class="pill total" title="0-based PDF pages sent to the parser">p. {{ result.start_page }}–{{ result.end_page }}</span>
+  {% endif %}
+  <span class="gate-reason" title="{{ result.error }}">{{ result.error }}</span>
+{% endif %}

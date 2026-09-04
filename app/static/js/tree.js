@@ -21,22 +21,49 @@
     return Array.from(list.children).filter((li) => li.classList.contains("tree-node"));
   }
 
-  const directBoxes = (node) => directNodes(node).map(boxOf).filter(Boolean);
+  // A disabled box is not part of the selection at all: it is never ticked by a
+  // parent, never counted, and never allowed to hold a folder back from reading
+  // as fully checked. Rows opt out by rendering the box disabled (the Headers
+  // tree does it for a document whose headers are already stored).
+  const selectable = (box) => Boolean(box) && !box.disabled;
+
+  const directBoxes = (node) =>
+    directNodes(node).map(boxOf).filter(selectable);
+
+  /** Whether this folder's loaded rows include a box that opted out. */
+  function hasOptedOut(node) {
+    const list = childListOf(node);
+    return Boolean(list && list.querySelector(".tree-check:disabled"));
+  }
 
   function setSubtree(node, checked) {
     const list = childListOf(node);
     if (!list) return;
     list.querySelectorAll(".tree-check").forEach((box) => {
+      if (!selectable(box)) return;
       box.checked = checked;
       box.indeterminate = false;
     });
   }
 
-  /** Derive one folder's state from the children currently rendered under it. */
+  /** Derive one folder's state from the children currently rendered under it.
+   *
+   *  A folder whose loaded children have all opted out has nothing a tick
+   *  could take, so its own box opts out too — and that propagates upward
+   *  through the ancestors the same way a tick does.
+   */
   function refresh(node) {
     const boxes = directBoxes(node);
     const box = boxOf(node);
-    if (!box || boxes.length === 0) return; // not expanded yet — leave as set
+    if (!box) return;
+    if (boxes.length === 0) {
+      if (directNodes(node).length === 0) return; // not expanded yet — leave as set
+      box.checked = false;
+      box.indeterminate = false;
+      box.disabled = true;
+      box.title = "Nothing left to select under this folder";
+      return;
+    }
 
     const checked = boxes.filter((b) => b.checked).length;
     const partial = boxes.some((b) => b.indeterminate) ||
@@ -60,13 +87,15 @@
    *
    *  A fully-checked folder counts its whole subtree from the server-supplied
    *  data-total, so the number is right even when the folder was never opened.
-   *  Indeterminate implies the children are loaded, so that case can recurse.
+   *  Indeterminate implies the children are loaded, so that case can recurse —
+   *  and so can a checked folder that is holding a row which opted out, where
+   *  data-total would count documents the tick did not actually take.
    */
   function pickedCount(node) {
     const box = boxOf(node);
     if (!box) return 0;
-    if (isFile(node)) return box.checked ? 1 : 0;
-    if (box.indeterminate) {
+    if (isFile(node)) return selectable(box) && box.checked ? 1 : 0;
+    if (box.indeterminate || (box.checked && hasOptedOut(node))) {
       return directNodes(node).reduce((n, child) => n + pickedCount(child), 0);
     }
     return box.checked ? Number(node.dataset.total || 0) : 0;
@@ -102,11 +131,20 @@
     }
   }
 
+  // Re-derived after something outside the tree changes a row's selectability —
+  // storing headers for a document disables its box, which changes the counts
+  // and may leave its folder with nothing to select. Pass the changed node so
+  // its ancestors are re-derived first.
+  window.refreshTreeCounts = (changed) => {
+    if (changed) refreshAncestors(changed);
+    updateCounts();
+  };
+
   // ---- events --------------------------------------------------------------
 
   document.addEventListener("change", (event) => {
     const box = event.target.closest(".tree-check");
-    if (!box) return;
+    if (!selectable(box)) return;
 
     const node = nodeOf(box);
     box.indeterminate = false;

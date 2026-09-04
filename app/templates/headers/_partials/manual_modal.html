@@ -1,0 +1,73 @@
+{#
+  The manual method: paste a contents page, get headers.
+
+  The paste is framed as a panel with its own strip rather than dropped into
+  the dialog as a bare box — the line count in that strip is the one piece of
+  feedback that tells someone their paste arrived whole, which is exactly the
+  thing that goes wrong when copying out of a PDF.
+
+  The textarea keeps whatever was submitted when the extraction fails, because
+  re-typing a pasted contents page is the one thing this screen must never ask
+  for twice.
+#}
+<dialog class="modal modal-manual" aria-label="Manual header extraction">
+  <header class="modal-head">
+    <span class="modal-heading">
+      <strong class="modal-title" title="{{ doc.filename }}">{{ doc.filename }}</strong>
+      <span class="modal-sub">Manual · paste the table of contents</span>
+    </span>
+    <span class="modal-actions">
+      {% if existing %}
+        <span class="pill total">{{ existing }} stored</span>
+      {% endif %}
+      <span class="spinner" id="manual-spinner"></span>
+      <button type="button" class="btn" data-close-modal>Close</button>
+    </span>
+  </header>
+
+  <form class="manual-form"
+        hx-post="{{ url_for('header_manual_submit', document_id=doc.id) }}"
+        hx-target="#modal"
+        hx-swap="innerHTML"
+        hx-indicator="#manual-spinner"
+        hx-disabled-elt="find button[type=submit]">
+    {% if error %}
+      <p class="parsed-error">⚠ {{ error }}</p>
+    {% endif %}
+
+    <div class="paste-panel">
+      <div class="paste-head">
+        <label class="paste-head-label" for="contents">📋 Contents page</label>
+        {#- Filled in by headers.js on every keystroke; the words are set
+            there too so a single line does not read as "1 lines". -#}
+        <span class="paste-stats" data-paste-stats>0 lines · 0 chars</span>
+      </div>
+
+      <textarea class="manual-input" id="contents" name="contents" resize="none"
+          cols="60" rows="20"
+                spellcheck="false" autocomplete="off" autofocus
+                data-paste-input
+                placeholder="제1편 재정 총론 …… 1&#10;  제1장 재정의 개념 …… 3&#10;    제1절 재정의 정의 …… 3&#10;  제2장 재정 운용의 원칙 …… 15">{{ contents }}</textarea>
+    </div>
+
+    <p class="manual-hint">
+      <span class="manual-hint-key">Keep the line breaks.</span>
+      Indentation and numbering are the only things that say what sits under
+      what. Dot leaders and trailing page numbers are fine — they are read and
+      stripped.
+    </p>
+
+    <div class="manual-foot">
+      <span class="manual-warn">
+        {% if existing %}
+          ⚠ Saving replaces the {{ existing }} header{{ '' if existing == 1 else 's' }}
+          already stored for this document.
+        {% endif %}
+      </span>
+      <span class="manual-actions">
+        <button type="button" class="btn ghost" data-paste-clear>Clear</button>
+        <button type="submit" class="btn btn-primary">📑 Get Header</button>
+      </span>
+    </div>
+  </form>
+</dialog>

@@ -27,6 +27,6 @@
   {#- The viewer pop-up, same as on the documents list. -#}
   <div id="modal"></div>
 
-  <script src="{{ url_for('static', path='js/viewer-modal.js') }}" defer></script>
-  <script src="{{ url_for('static', path='js/tree.js') }}" defer></script>
+  <script src="{{ static_url('js/viewer-modal.js') }}" defer></script>
+  <script src="{{ static_url('js/tree.js') }}" defer></script>
 {% endblock %}

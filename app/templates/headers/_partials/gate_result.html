@@ -1,0 +1,83 @@
+{#
+  The outcome of a "Get Header" click: the selection after the has_header gate
+  has run over it. Eligible documents are listed individually because every
+  method works one document at a time — the list is the work queue.
+
+  Under Manual the queue is a to-do list: one paste per row. Under Pages it is
+  live: headers.js walks it top to bottom, posting each row's data-run-url and
+  swapping the reply into its status cell, while the strip above keeps time.
+
+  data-updates repaints the has_header pills of anything this gate had to check
+  on the way in, the same way the plain check does.
+#}
+{% set live = gate.method.value == 'pages' %}
+<div class="card check-result"
+     data-updates='{{ gate.updates|tojson }}'
+     {% if live %}data-run="pages" data-pages="{{ pages }}"{% endif %}>
+  <div class="check-summary">
+    <span class="pill total">method: {{ gate.method.label }}</span>
+    {% if live %}
+      <span class="pill total">+{{ pages }} page{{ '' if pages == 1 else 's' }} after the contents page</span>
+    {% endif %}
+    <span class="pill ok">✓ {{ gate.eligible|length }} eligible</span>
+    {% if gate.skipped %}
+      <span class="pill total">↷ {{ gate.skipped|length }} skipped, no header</span>
+    {% endif %}
+    {% if gate.checked_now %}
+      <span class="pill total">🔍 {{ gate.checked_now }} checked just now</span>
+    {% endif %}
+    {% if gate.failed %}
+      <span class="pill fail">✗ {{ gate.failed|length }} could not be checked</span>
+    {% endif %}
+  </div>
+
+  {% if live and gate.eligible %}
+    {#- The clock for the whole run. Filled in by headers.js every second:
+        elapsed as m:ss, how far down the queue it is, and the tally at the
+        end. Stop lets the current document finish and leaves the rest. -#}
+    <div class="run-strip" data-run-strip>
+      <span class="run-timer" data-run-timer>0:00</span>
+      <span class="pill total" data-run-state>⏳ starting</span>
+      <span class="run-progress" data-run-progress>0 / {{ gate.eligible|length }}</span>
+      <span class="run-tally" data-run-tally></span>
+      <span class="toolbar-spacer"></span>
+      <button type="button" class="btn ghost" data-run-stop>■ Stop</button>
+    </div>
+  {% endif %}
+
+  {% if gate.eligible %}
+    <ul class="gate-queue">
+      {% for candidate in gate.eligible %}
+        <li class="gate-row"
+            {% if live %}data-run-url="{{ url_for('header_pages_run', document_id=candidate.id) }}"{% endif %}>
+          <span class="gate-name" title="{{ candidate.filename }}">{{ candidate.filename }}</span>
+          <span class="gate-status">
+            {% if live %}
+              <span class="pill total">queued</span>
+            {% elif candidate.header_count %}
+              <span class="pill ok">{{ candidate.header_count }} headers</span>
+            {% else %}
+              <span class="pill total">no headers yet</span>
+            {% endif %}
+          </span>
+          <span class="gate-actions">
+            <a class="btn btn-manual" data-viewer
+               href="{{ url_for('header_manual_form', document_id=candidate.id) }}">Manual</a>
+            <a class="btn btn-outline" data-viewer
+               href="{{ url_for('header_outline', document_id=candidate.id) }}">Headers</a>
+          </span>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="check-note">Nothing in this selection has a contents page to read.</p>
+  {% endif %}
+
+  {% if gate.failed %}
+    <ul class="check-failures">
+      {% for filename, reason in gate.failed %}
+        <li><strong>{{ filename }}</strong> — {{ reason }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</div>

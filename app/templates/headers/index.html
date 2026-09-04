@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Headers · partial-server{% endblock %}
+{% block heading %}🗂️ Headers{% endblock %}
+{% block subheading %}Pick documents, then settle whether each one has a table of contents.{% endblock %}
+
+{% block actions %}
+  <span id="tree-selection" class="toolbar-count">Nothing selected</span>
+{% endblock %}
+
+{% block content %}
+  <div class="card toolbar">
+    <button type="button" class="btn btn-md" id="btn-has-header"
+            hx-post="{{ url_for('headers_check') }}"
+            hx-vals="js:{selection: window.treeSelectionJSON()}"
+            hx-target="#header-result"
+            hx-swap="innerHTML"
+            hx-indicator="#header-spinner">
+      🔍 Has Header
+    </button>
+    {#- Disabled under Manual: that method runs from the Manual button on each
+        row, so a batch button has nothing to do. headers.js keeps this in
+        step with the picker. -#}
+    <button type="button" class="btn btn-manual" id="btn-get-header" disabled
+            title="Pick a method other than Manual"
+            hx-post="{{ url_for('headers_get') }}"
+            hx-vals="js:{selection: window.treeSelectionJSON(), method: window.headerMethod(), pages: window.headerPages()}"
+            hx-target="#header-result"
+            hx-swap="innerHTML"
+            hx-indicator="#header-spinner">
+      📑 Get Header
+    </button>
+    <label class="method-picker">
+      <span class="method-label">method</span>
+      <select id="header-method" name="method">
+        {% for method in methods %}
+          <option value="{{ method.value }}">{{ method.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {#- Only the Pages method reads this: how many pages after the contents
+        page go to the parser (end page = start + pages). It appears when
+        Pages is picked and is hidden under any other method. -#}
+    <label class="method-picker" id="pages-picker" hidden>
+      <span class="method-label">pages</span>
+      <input type="number" id="header-pages" name="pages" class="pages-input"
+             value="{{ default_pages }}" min="{{ min_pages }}" max="{{ max_pages }}" step="1"
+             title="Pages after the contents page to parse (end page = start + pages, inclusive)">
+    </label>
+    <span class="spinner" id="header-spinner"></span>
+    <span class="toolbar-spacer"></span>
+    <span class="toolbar-count">
+      Already decided documents are skipped · at most <strong>{{ max_batch }}</strong> per click
+    </span>
+  </div>
+
+  <div id="header-result"></div>
+
+  <div class="card tree-card">
+    <div class="tree-head">
+      <span class="tree-head-label">📚 Corpus</span>
+      <span class="tree-badges" id="tree-root-badges" data-total="{{ total }}">
+        {% if failed %}<span class="pill fail">✗ {{ "{:,}".format(failed) }}</span>{% endif %}
+        <span class="pill total">{{ "{:,}".format(total) }}</span>
+        <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
+      </span>
+    </div>
+
+    <ul class="tree tree-children" id="tree-root">
+      {% include "headers/_partials/level.html" %}
+    </ul>
+  </div>
+
+  {#- The viewer pop-up, same as on the documents list. -#}
+  <div id="modal"></div>
+
+  <script src="{{ static_url('js/viewer-modal.js') }}" defer></script>
+  <script src="{{ static_url('js/tree.js') }}" defer></script>
+  <script src="{{ static_url('js/headers.js') }}" defer></script>
+{% endblock %}

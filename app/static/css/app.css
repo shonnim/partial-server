@@ -33,6 +33,17 @@
   --tint-pdf: #5b6ef5;
   --tint-json: #b0741d;
   --tint-md: #2f9367;
+  --tint-manual: #8a5cd6;
+  --tint-outline: #1f8a8a;
+
+  /* Outline depth. Level 1 is the strongest; each step down loses saturation,
+     so nesting reads as distance from the trunk rather than as five unrelated
+     colours. */
+  --lvl-1: #4657d8;
+  --lvl-2: #8a5cd6;
+  --lvl-3: #b0741d;
+  --lvl-4: #2f9367;
+  --lvl-5: #8b93b5;
 
   /* One mono stack, best available first. Ligature-capable faces are listed
      ahead of the system defaults but nothing is fetched: no build step, no
@@ -354,17 +365,51 @@ table.docs tbody tr:hover { background: var(--accent-tint); }
 }
 .btn.ghost { border-color: transparent; background: transparent; }
 
+/* Filled, for the single action a dialog exists to perform. Everything else in
+   the app is an outline button, so there is never more than one of these. */
+.btn-primary {
+  --btn-tint: var(--tint-manual);
+  height: 34px;
+  padding: 0 16px;
+  border-color: transparent;
+  background: var(--btn-tint);
+  color: #fff;
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--btn-tint) 32%, transparent);
+}
+.btn-primary:hover {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--btn-tint) 88%, #000);
+  color: #fff;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--btn-tint) 40%, transparent);
+}
+.btn-primary[disabled], .btn-primary.is-disabled {
+  background: var(--line-strong);
+  color: var(--panel);
+  box-shadow: none;
+}
+
 /* Tinted variants: set the tint, and wear it. */
 .btn-pdf { --btn-tint: var(--tint-pdf); }
 .btn-json { --btn-tint: var(--tint-json); }
 .btn-md { --btn-tint: var(--tint-md); }
+.btn-manual { --btn-tint: var(--tint-manual); }
+.btn-outline { --btn-tint: var(--tint-outline); }
 
-.btn-pdf, .btn-json, .btn-md {
+/* A Headers button with nothing behind it stays legible but stops advertising
+   itself, so a folder of untouched documents does not look finished. */
+.btn-outline.is-empty {
+  border-color: var(--line);
+  background: var(--panel-soft);
+  color: var(--ink-faint);
+}
+
+.btn-pdf, .btn-json, .btn-md, .btn-manual, .btn-outline {
   border-color: color-mix(in srgb, var(--btn-tint) 26%, #fff);
   background: color-mix(in srgb, var(--btn-tint) 7%, #fff);
   color: var(--btn-tint);
 }
-.btn-pdf:hover, .btn-json:hover, .btn-md:hover {
+.btn-pdf:hover, .btn-json:hover, .btn-md:hover,
+.btn-manual:hover, .btn-outline:hover {
   border-color: color-mix(in srgb, var(--btn-tint) 52%, #fff);
   background: color-mix(in srgb, var(--btn-tint) 14%, #fff);
 }
@@ -408,6 +453,12 @@ table.docs tbody tr:hover { background: var(--accent-tint); }
 .pill.ok    { background: var(--ok-soft); color: var(--ok); }
 .pill.fail  { background: var(--fail-soft); color: var(--fail); }
 .pill.total { background: #f1f3fb; color: var(--ink-soft); }
+/* Stored headers wear the Headers button's tint, so the count on a row and
+   the button that opens it read as one thing. */
+.pill.headers {
+  background: color-mix(in srgb, var(--tint-outline) 11%, #fff);
+  color: var(--tint-outline);
+}
 
 /* ---------- viewer ---------- */
 
@@ -597,6 +648,12 @@ dialog.modal::backdrop { background: rgba(30, 35, 66, .46); backdrop-filter: blu
   cursor: pointer;
 }
 
+/* A document whose headers are already stored is out of the selection. It
+   stays visible rather than hidden — the row is still how you open those
+   headers — but it reads as settled, not as something left untouched. */
+.tree-check:disabled { cursor: default; opacity: .4; }
+.tree-row:has(> .tree-check:disabled) .tree-name { color: var(--ink-soft); }
+
 /* The folder name is the open/close control; no separate arrow. */
 .tree-label {
   display: flex;
@@ -643,6 +700,235 @@ dialog.modal::backdrop { background: rgba(30, 35, 66, .46); backdrop-filter: blu
 .tree-more { padding: 8px 4px 6px 30px; }
 .tree-empty { padding: 8px 4px 6px 30px; color: var(--ink-faint); font-size: 12.5px; }
 
+/* ---------- header check result ---------- */
+
+.check-result { padding: 14px 16px; margin-bottom: 16px; }
+.check-result.is-error { color: var(--fail); }
+.check-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+.check-failures {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+.check-failures strong { color: var(--ink); font-weight: 600; }
+.check-note { margin: 10px 0 0; color: var(--ink-soft); font-size: 12.5px; }
+
+/* Reserves no space while a document is UNCHECKED, so undecided rows read as
+   quiet rather than as a negative answer. */
+.has-header:empty { display: none; }
+
+/* Same idea for the stored count: a document with no headers yet says
+   nothing rather than saying zero. */
+.header-count:empty { display: none; }
+
+/* ---------- method picker ---------- */
+
+.method-picker { display: flex; align-items: center; gap: 7px; }
+.method-label {
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  letter-spacing: .3px;
+  text-transform: uppercase;
+}
+.method-picker select { height: 32px; font-size: 12.5px; }
+
+/* ---------- extraction queue ---------- */
+
+/* The eligible documents after the gate. One row per document because the
+   manual method needs one paste per document — this list is the work queue. */
+.gate-queue { margin: 12px 0 0; padding: 0; list-style: none; }
+.gate-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 2px;
+  border-top: 1px solid var(--line);
+}
+.gate-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gate-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+
+/* ---------- manual extraction ---------- */
+
+dialog.modal-narrow { width: min(880px, 94vw); height: min(760px, 88vh); }
+dialog.modal-manual { width: min(820px, 94vw); height: min(700px, 88vh); }
+
+/* A two-line dialog title: the file being worked on, and what is being done to
+   it. The pop-up can be reached from three places, so it says which one. */
+.modal-heading { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.modal-sub {
+  color: var(--ink-faint);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: .2px;
+}
+
+.manual-form {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 16px 18px 18px;
+}
+
+/* The paste is framed as its own panel with a strip on top, so a big empty box
+   reads as somewhere to put something rather than as an unfinished screen. */
+.paste-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  /* A floor so the paste box never collapses to its strip on a short
+     viewport — min-height: 0 alone lets a flex column squeeze a scrollable
+     child down to nothing. */
+  min-height: 260px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+  overflow: hidden;
+  transition: border-color var(--ease), box-shadow var(--ease);
+}
+.paste-panel:focus-within {
+  border-color: var(--tint-manual);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--tint-manual) 12%, transparent);
+}
+
+.paste-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.paste-head-label {
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .3px;
+  text-transform: uppercase;
+}
+.paste-stats {
+  color: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+/* The counts are the "did my paste arrive whole" signal, so they stop being
+   grey the moment there is something to count. */
+.paste-panel:has(.manual-input:not(:placeholder-shown)) .paste-stats { color: var(--tint-manual); }
+
+.manual-input {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  padding: 14px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.75;
+  resize: none;
+  tab-size: 4;
+  /* Contents lines are long and their leading indent is the data, so they wrap
+     rather than scroll sideways: pre-wrap keeps the indent, and a wrapped tail
+     is far easier to check than one parked off the right edge. */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.manual-input:focus { outline: none; }
+.manual-input::placeholder { color: var(--ink-faint); opacity: .65; }
+.manual-input::-webkit-scrollbar { width: 12px; }
+.manual-input::-webkit-scrollbar-track { background: transparent; }
+.manual-input::-webkit-scrollbar-thumb {
+  border: 3px solid var(--panel-soft);
+  border-radius: 999px;
+  background: #ccd2e8;
+}
+.manual-input::-webkit-scrollbar-thumb:hover { background: #b3bcdd; }
+
+.manual-hint {
+  margin: 11px 2px 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.65;
+}
+.manual-hint-key { color: var(--ink); font-weight: 650; }
+
+.manual-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.manual-warn { color: var(--ink-soft); font-size: 12px; line-height: 1.5; }
+.manual-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+
+/* ---------- stored outline ---------- */
+
+/* Depth is carried three ways at once — indent, a coloured rail, and weight —
+   so a mis-nested chapter is visible without reading a single title. */
+.outline-body { flex: 1; min-height: 0; padding: 14px 18px 20px; overflow-y: auto; }
+.outline-list { margin: 0; padding: 0 0 0 18px; list-style: none; }
+.outline-body > .outline-list { padding-left: 0; }
+
+.outline-row {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 5px 8px 5px 0;
+  border-radius: var(--radius-sm);
+}
+.outline-row:hover { background: var(--accent-tint); }
+
+.outline-rail {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--lvl-tint, var(--lvl-5));
+}
+.outline-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.55;
+  word-break: break-word;
+}
+.outline-page, .outline-kids { flex: 0 0 auto; }
+
+.outline-node.lvl-1 { --lvl-tint: var(--lvl-1); }
+.outline-node.lvl-2 { --lvl-tint: var(--lvl-2); }
+.outline-node.lvl-3 { --lvl-tint: var(--lvl-3); }
+.outline-node.lvl-4 { --lvl-tint: var(--lvl-4); }
+.outline-node.lvl-5 { --lvl-tint: var(--lvl-5); }
+
+.outline-node.lvl-1 > .outline-row > .outline-title { font-size: 14px; font-weight: 680; }
+.outline-node.lvl-2 > .outline-row > .outline-title { font-weight: 620; }
+.outline-node.lvl-3 > .outline-row > .outline-title { font-size: 12.5px; }
+.outline-node.lvl-4 > .outline-row > .outline-title,
+.outline-node.lvl-5 > .outline-row > .outline-title {
+  color: var(--ink-soft);
+  font-size: 12.5px;
+}
+
 /* ---------- responsive ---------- */
 
 @media (max-width: 1100px) {
@@ -653,3 +939,80 @@ dialog.modal::backdrop { background: rgba(30, 35, 66, .46); backdrop-filter: blu
   .content { padding: 20px 18px 36px; }
   .topbar { padding: 20px 18px 16px; }
 }
+
+/* ---------- pages method ---------- */
+
+.pages-input {
+  width: 64px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: center;
+}
+/* The picker is revealed by headers.js, and by this rule as well: as long as
+   the Pages option is the selected one, the field shows even if the script
+   the browser is holding is an older copy. */
+.toolbar:has(#header-method option[value="pages"]:checked) #pages-picker[hidden] {
+  display: flex;
+}
+.pages-input:focus {
+  outline: none;
+  background: var(--panel);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+/* The clock over a live queue. The timer is the thing to glance at while a
+   parse runs, so it is the largest thing on the strip. */
+.run-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+}
+.run-timer {
+  min-width: 56px;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 680;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.3px;
+}
+.run-progress, .run-tally {
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Per-row outcome under Pages: sits between the name and the buttons and
+   takes the room the name gives up, so a long reason trails off rather than
+   pushing the buttons off the card. */
+.gate-status {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.gate-row .gate-name { flex: 0 1 auto; max-width: 48%; }
+.gate-reason {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fail);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gate-row.is-running { background: var(--accent-soft); }
+.pill.is-live [data-row-timer] { font-variant-numeric: tabular-nums; }

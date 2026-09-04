@@ -1,0 +1,41 @@
+{#
+  One level of the header tree. Same shape as the parsing tree — folders first,
+  then the documents in this folder — but the rows report header state rather
+  than parse state, and expanding fetches from the headers routes.
+
+  A folder whose every document already has headers is rendered with its box
+  disabled, the same way such a document's row is: there is nothing under it
+  a tick could take. tree.js keeps this true as rows change — once the last
+  selectable thing under a folder is gone, the folder's box goes too.
+#}
+{% for folder in level.folders %}
+  <li class="tree-node" data-path="{{ folder.path }}" data-total="{{ folder.total }}">
+    <div class="tree-row">
+      <input type="checkbox" class="tree-check" data-kind="folder"
+             aria-label="Select folder {{ folder.name }}"
+             {% if folder.all_stored %}disabled
+             title="Headers already stored for all {{ folder.total }} document{{ '' if folder.total == 1 else 's' }}"{% endif %}>
+      <button type="button" class="tree-label" aria-expanded="false"
+              hx-get="{{ url_for('headers_nodes') }}?path={{ folder.path|urlencode }}"
+              hx-target="next .tree-children"
+              hx-swap="innerHTML"
+              hx-trigger="click once">
+        <span class="tree-icon">
+          <span class="icon-closed">📁</span><span class="icon-open">📂</span>
+        </span>
+        <span class="tree-name" title="{{ folder.path }}">{{ folder.name }}</span>
+      </button>
+      <span class="tree-badges">
+        <span class="pill total">{{ folder.total }}</span>
+        <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
+      </span>
+    </div>
+    <ul class="tree-children" hidden></ul>
+  </li>
+{% endfor %}
+
+{% include "headers/_partials/files.html" %}
+
+{% if level.is_empty %}
+  <li class="tree-empty">Empty folder</li>
+{% endif %}

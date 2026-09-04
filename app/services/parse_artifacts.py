@@ -36,9 +36,10 @@ class ArtifactKind(str, enum.Enum):
 
 
 # How each kind is recognised among the keys in a run directory, best match
-# first. The v2 content list supersedes the original where a run wrote both.
+# first. The original content list is what the panel reviews; the v2 variant is
+# only a fallback for runs that wrote nothing else.
 _SUFFIXES: dict[ArtifactKind, tuple[str, ...]] = {
-    ArtifactKind.JSON: ("_content_list_v2.json", "_content_list.json", ".json"),
+    ArtifactKind.JSON: ("_content_list.json", "_content_list_v2.json", ".json"),
     ArtifactKind.MD: (".md",),
 }
 
@@ -81,6 +82,9 @@ class ArtifactText:
     artifact: ParseArtifact
     body: str | None
     error: str | None
+    #: Number of blocks in a content list. None for markdown, and for JSON that
+    #: is not a top-level list — a count off some other shape would be a lie.
+    blocks: int | None = None
 
 
 def latest_parsed_doc(db: Session, doc_id: uuid.UUID) -> ParsedDoc | None:
@@ -184,4 +188,5 @@ def load_artifact_text(artifact: ParseArtifact) -> ArtifactText:
         artifact=artifact,
         body=json.dumps(parsed_json, indent=2, ensure_ascii=False),
         error=None,
+        blocks=len(parsed_json) if isinstance(parsed_json, list) else None,
     )

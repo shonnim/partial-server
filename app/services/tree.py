@@ -18,7 +18,7 @@ from math import ceil
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.models.document import DocumentStatus
+from app.models.document import DocumentStatus, HasHeader
 
 # Files listed per folder before the UI has to ask for more.
 DEFAULT_FILE_PAGE = 50
@@ -36,6 +36,13 @@ class FolderNode:
     path: str
     total: int
     failed: int
+    # Documents beneath this folder that already have headers stored. When it
+    # is every one of them, the folder has nothing left to select.
+    with_headers: int
+
+    @property
+    def all_stored(self) -> bool:
+        return self.total > 0 and self.with_headers == self.total
 
 
 @dataclass(frozen=True)
@@ -47,6 +54,10 @@ class FileNode:
     size_bytes: int
     pages: int | None
     status: DocumentStatus
+    has_header: HasHeader
+    # How many headers have been stored for this document, which is what the
+    # Headers button on the row reports.
+    header_count: int
     # Whether a parse run has recorded output for this document, which is what
     # decides if the JSON / MD buttons on the row do anything.
     parsed: bool
@@ -92,13 +103,17 @@ def child_folders(db: Session, path: str) -> list[FolderNode]:
     rows = db.execute(
         text(f"""
             WITH scoped AS (
-                SELECT status, {_FOLDER_EXPR} AS folder
+                SELECT status, {_FOLDER_EXPR} AS folder,
+                       EXISTS (
+                           SELECT 1 FROM headers h WHERE h.doc_id = documents.id
+                       ) AS stored
                 FROM documents
                 WHERE :path = '' OR starts_with(s3_key, :path || '/')
             )
             SELECT split_part(folder, '/', :child_depth) AS name,
                    count(*) AS total,
-                   count(*) FILTER (WHERE status = 'FAILED') AS failed
+                   count(*) FILTER (WHERE status = 'FAILED') AS failed,
+                   count(*) FILTER (WHERE stored) AS with_headers
             FROM scoped
             WHERE folder IS NOT NULL
               AND split_part(folder, '/', :child_depth) <> ''
@@ -114,6 +129,7 @@ def child_folders(db: Session, path: str) -> list[FolderNode]:
             path=f"{path}/{r.name}" if path else r.name,
             total=r.total,
             failed=r.failed,
+            with_headers=r.with_headers,
         )
         for r in rows
     ]
@@ -140,7 +156,10 @@ def folder_files(
 
     rows = db.execute(
         text(f"""
-            SELECT id, filename, size_bytes, pages, status,
+            SELECT id, filename, size_bytes, pages, status, has_header,
+                   (
+                       SELECT count(*) FROM headers h WHERE h.doc_id = documents.id
+                   ) AS header_count,
                    EXISTS (
                        SELECT 1 FROM parsed_docs p WHERE p.doc_id = documents.id
                    ) AS parsed
@@ -159,6 +178,8 @@ def folder_files(
             size_bytes=r.size_bytes,
             pages=r.pages,
             status=DocumentStatus(r.status),
+            has_header=HasHeader(r.has_header),
+            header_count=r.header_count,
             parsed=r.parsed,
         )
         for r in rows
@@ -197,6 +218,34 @@ def root_totals(db: Session) -> tuple[int, int]:
         """)
     ).one()
     return r.total, r.failed
+
+
+def documents_in_folders(
+    db: Session, paths: Sequence[str], *, limit: int
+) -> list[uuid.UUID]:
+    """Every document beneath any of ``paths``, up to ``limit`` + 1 rows.
+
+    One extra row is fetched deliberately: the caller needs to tell "exactly
+    the limit" from "more than the limit" without counting the whole corpus.
+    """
+    if not paths:
+        return []
+
+    rows = db.execute(
+        text("""
+            SELECT id
+            FROM documents d
+            WHERE EXISTS (
+                SELECT 1 FROM unnest(cast(:paths AS text[])) AS p
+                WHERE starts_with(d.s3_key, p || '/')
+            )
+            ORDER BY d.filename, d.id
+            LIMIT :limit
+        """),
+        {"paths": list(paths), "limit": limit + 1},
+    ).all()
+
+    return [r.id for r in rows]
 
 
 def page_count(total: int, per_page: int) -> int:

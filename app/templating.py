@@ -11,6 +11,7 @@ from pathlib import Path
 from fastapi.templating import Jinja2Templates
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+STATIC_DIR = Path(__file__).parent / "static"
 
 _SIZE_UNITS = ("B", "KB", "MB", "GB", "TB")
 
@@ -19,6 +20,7 @@ NAV_ITEMS = (
     {"key": "dashboard", "label": "Dashboard", "icon": "📊", "url": "/"},
     {"key": "documents", "label": "Documents", "icon": "📄", "url": "/documents"},
     {"key": "parsing", "label": "Parsing", "icon": "⚙️", "url": "/parsing"},
+    {"key": "headers", "label": "Headers", "icon": "🗂️", "url": "/headers"},
 )
 
 
@@ -44,8 +46,21 @@ def filesize(num_bytes: int | None) -> str:
     return f"{size:.1f} TB"
 
 
+def static_url(path: str) -> str:
+    """The URL of a static file, stamped with its modification time.
+
+    The stamp changes whenever the file does, so a browser that cached the
+    previous script or stylesheet fetches the new one on the next page load
+    instead of running stale code against a fresh template.
+    """
+    file = STATIC_DIR / path
+    version = int(file.stat().st_mtime) if file.exists() else 0
+    return f"/static/{path}?v={version}"
+
+
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["short_id"] = short_id
 templates.env.filters["folder_path"] = folder_path
 templates.env.filters["filesize"] = filesize
 templates.env.globals["nav_items"] = NAV_ITEMS
+templates.env.globals["static_url"] = static_url

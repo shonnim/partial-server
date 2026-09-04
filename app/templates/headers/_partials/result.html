@@ -1,0 +1,38 @@
+{#
+  The outcome of one "Has Header" click. Failures are listed by name with the
+  reason attached — a document whose markdown could not be read is left
+  UNCHECKED, and saying so is the whole point of showing this panel.
+
+  data-updates carries the new verdicts so headers.js can repaint the rows that
+  are already on the page without reloading the tree.
+#}
+{% if error %}
+  <div class="card check-result is-error">
+    <strong>⚠ {{ error }}</strong>
+  </div>
+{% else %}
+  <div class="card check-result" data-updates='{{ report.updates|tojson }}'>
+    <div class="check-summary">
+      <span class="pill ok">✓ {{ report.yes }} yes header</span>
+      <span class="pill total">— {{ report.no }} no header</span>
+      {% if report.skipped %}
+        <span class="pill total">↷ {{ report.skipped }} already decided</span>
+      {% endif %}
+      {% if report.failed %}
+        <span class="pill fail">✗ {{ report.failed }} could not be read</span>
+      {% endif %}
+    </div>
+
+    {% if report.failures %}
+      <ul class="check-failures">
+        {% for check in report.failures %}
+          <li><strong>{{ check.filename }}</strong> — {{ check.error }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {% if not report.checks %}
+      <p class="check-note">No documents matched the selection.</p>
+    {% endif %}
+  </div>
+{% endif %}
