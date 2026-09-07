@@ -23,7 +23,7 @@ from app.services.header_pages import (
     MIN_PAGES,
     run_pages,
 )
-from app.services.headers import MAX_CHECK_BATCH, check_has_header
+from app.services.headers import MAX_CHECK_BATCH, check_has_header, load_content_list
 from app.services.tree import (
     DEFAULT_FILE_PAGE,
     documents_in_folders,
@@ -250,7 +250,11 @@ def header_manual_submit(
             },
         )
 
-    saved = save_headers(db, doc.id, extracted)
+    # The page indexes come from the content list a parse left behind. A
+    # document with no readable content list still gets its headers; only the
+    # two index columns stay NULL.
+    blocks, _ = load_content_list(db, doc)
+    saved = save_headers(db, doc.id, extracted, blocks)
 
     return templates.TemplateResponse(
         request,

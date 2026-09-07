@@ -16,7 +16,12 @@
           <span class="outline-rail"></span>
           <span class="outline-title">{{ node.title }}</span>
           {% if node.start_page is not none %}
-            <span class="pill total outline-page">p. {{ node.start_page }}</span>
+            <span class="pill total outline-page" title="printed page number">p. {{ node.start_page }}</span>
+          {% endif %}
+          {% if node.start_page_idx is not none or node.end_page_idx is not none %}
+            <span class="pill total outline-idx" title="content list page_idx, start–end">
+              idx {{ node.start_page_idx if node.start_page_idx is not none else '?' }}–{{ node.end_page_idx if node.end_page_idx is not none else '?' }}
+            </span>
           {% endif %}
           {% if node.children %}
             <span class="pill total outline-kids">{{ node.children|length }} ↓</span>

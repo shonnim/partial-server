@@ -912,7 +912,7 @@ dialog.modal-manual { width: min(820px, 94vw); height: min(700px, 88vh); }
   line-height: 1.55;
   word-break: break-word;
 }
-.outline-page, .outline-kids { flex: 0 0 auto; }
+.outline-page, .outline-idx, .outline-kids { flex: 0 0 auto; }
 
 .outline-node.lvl-1 { --lvl-tint: var(--lvl-1); }
 .outline-node.lvl-2 { --lvl-tint: var(--lvl-2); }

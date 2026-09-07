@@ -200,7 +200,7 @@ def run_pages(db: Session, document: Document, pages: int) -> PagesResult:
         )
     llm_seconds = time.monotonic() - began
 
-    saved = save_headers(db, document.id, extracted)
+    saved = save_headers(db, document.id, extracted, blocks)
 
     return PagesResult(
         id=document.id,

@@ -14,6 +14,7 @@ flip an earlier verdict.
 
 import enum
 import json
+import re
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -190,6 +191,39 @@ def contents_page_index(blocks: Any) -> int | None:
         if isinstance(page, int) and not isinstance(page, bool) and page >= 0:
             return page
     return None
+
+
+# A run of digits not touching another digit, so page "1" in "1 •" matches
+# while "1" in "12" does not.
+_NUMBER_TOKEN = re.compile(r"(?<!\d)\d+(?!\d)")
+
+
+def page_number_index(blocks: Any) -> dict[int, int]:
+    """Printed page number → ``page_idx`` of the block that carries it.
+
+    Built from the ``page_number`` blocks of a content list. The text of such
+    a block is whatever the parser read off the page — "12", "- 12 -",
+    "12 •" — so every whole number in it is taken as a printed page number.
+    The first block to carry a number wins; a number printed twice (a running
+    header and a footer on the same page, or a two-up parse) keeps its
+    earliest page index.
+    """
+    index: dict[int, int] = {}
+    if not isinstance(blocks, list):
+        return index
+
+    for block in blocks:
+        if not isinstance(block, dict) or block.get("type") != "page_number":
+            continue
+        page = block.get("page_idx")
+        if not isinstance(page, int) or isinstance(page, bool) or page < 0:
+            continue
+        text = block.get("text")
+        if not isinstance(text, str):
+            continue
+        for token in _NUMBER_TOKEN.findall(text):
+            index.setdefault(int(token), page)
+    return index
 
 
 def check_has_header(db: Session, doc_ids: Sequence[uuid.UUID]) -> CheckReport:

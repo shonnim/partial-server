@@ -31,7 +31,11 @@ class Header(Base):
         nullable=True,
         index=True,
     )
+    # Depth in the outline: 1 for a root, 2 for its children, and so on.
+    level: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     start_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    start_page_idx: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    end_page_idx: Mapped[int | None] = mapped_column(Integer, nullable=True)
     conclusion: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
