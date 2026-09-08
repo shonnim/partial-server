@@ -48,19 +48,25 @@ Two hard constraints:
 ## Commands
 
 ```bash
-uv sync                          # install / align the environment
-uv run fastapi dev app/main.py   # dev server with autoreload
-uv add <package>                 # add a dependency (never edit pyproject by hand)
-uv run pytest                    # tests
-uv run ruff check --fix .        # lint
-uv run ruff format .             # format
+uv sync                                    # install / align the environment
+uv run python -m fastapi dev app/main.py   # dev server with autoreload
+uv add <package>                           # add a dependency (never edit pyproject by hand)
+uv run python -m pytest                    # tests
+uv run python -m ruff check --fix .        # lint
+uv run python -m ruff format .             # format
+uv run python -m alembic upgrade head      # migrations
 ```
 
 Always run Python through `uv run`. Do not activate the venv manually and do not
 call bare `python` or `pip`.
 
-<!-- TODO: add migration + worker commands once those exist, e.g.
-uv run alembic upgrade head
+Always invoke CLI tools as `uv run python -m <tool>`, never as `uv run <tool>`.
+This machine runs Windows 11 with Smart App Control on, which blocks the
+unsigned `.exe` launcher shims uv generates in `.venv/Scripts/` (error 4551,
+"An Application Control policy has blocked this file"). The venv's
+`python.exe` is signed and runs fine, so the `-m` form bypasses the block.
+
+<!-- TODO: add worker commands once those exist, e.g.
 uv run python -m app.worker
 -->
 

@@ -9,6 +9,9 @@
     <span class="modal-actions">
       {% if text.blocks is not none %}
         <span class="pill total">{{ text.blocks }} blocks</span>
+        <span class="pill total" title='blocks with "type": "table"'>{{ text.tables }} tables</span>
+        <span class="pill total" title='blocks with "type": "chart"'>{{ text.charts }} charts</span>
+        <span class="pill total" title='blocks with "type": "image"'>{{ text.images }} images</span>
       {% endif %}
       <span class="pill total">{{ text.artifact.size_bytes|filesize }}</span>
       <a class="btn btn-{{ text.artifact.kind.value }}" target="_blank" rel="noopener"
