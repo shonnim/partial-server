@@ -62,6 +62,13 @@ class HeaderContent(Base):
         nullable=False,
         index=True,
     )
+    doc_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    page_idx: Mapped[int | None] = mapped_column(Integer, nullable=True)
     type: Mapped[str] = mapped_column(String(50), nullable=False)
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
     # "order" is a reserved word in SQL; SQLAlchemy quotes it on emit.
