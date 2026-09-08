@@ -17,7 +17,9 @@ Layout a run produces, for a document named ``report.pdf``:
 import enum
 import json
 import posixpath
+import re
 import uuid
+from collections import Counter
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -52,6 +54,22 @@ _MEDIA_TYPES: dict[ArtifactKind, str] = {
 # is offered as a download instead of being pushed through the page.
 MAX_INLINE_BYTES = 8 * 1024 * 1024
 
+# The subfolder of a run directory that holds the page crops.
+IMAGES_FOLDER = "images"
+
+# An image name as the parser writes it: a digest plus an extension, nothing
+# that could name a different folder. Anything else is refused before the
+# key is even built.
+_IMAGE_NAME = re.compile(r"^[A-Za-z0-9_-]+\.(?:jpe?g|png|webp|gif)$", re.IGNORECASE)
+
+_IMAGE_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
+
 
 class ArtifactUnavailable(LookupError):
     """This document has no parse artifact of the requested kind."""
@@ -85,6 +103,27 @@ class ArtifactText:
     #: Number of blocks in a content list. None for markdown, and for JSON that
     #: is not a top-level list — a count off some other shape would be a lie.
     blocks: int | None = None
+    #: How many of those blocks are tables, charts, and images. Zero when the
+    #: list has none; None whenever ``blocks`` is.
+    tables: int | None = None
+    charts: int | None = None
+    images: int | None = None
+
+
+@dataclass(frozen=True)
+class ParseImage:
+    """One image a parse run wrote, located in RustFS."""
+
+    bucket: str
+    key: str
+
+    @property
+    def filename(self) -> str:
+        return posixpath.basename(self.key)
+
+    @property
+    def media_type(self) -> str:
+        return _IMAGE_TYPES[posixpath.splitext(self.key)[1].lower()]
 
 
 def latest_parsed_doc(db: Session, doc_id: uuid.UUID) -> ParsedDoc | None:
@@ -144,6 +183,35 @@ def resolve_artifact(
     raise ArtifactUnavailable(f"no {kind.value} output under {parsed.bucket}/{prefix}")
 
 
+def resolve_image(db: Session, document: Document, name: str) -> ParseImage:
+    """Locate one image of a document's latest parse run by its file name.
+
+    The key is built, not listed: a run directory holds a page crop per
+    figure and listing them all to serve one would be the expensive way to
+    find out the name is wrong. A key that does not exist surfaces when the
+    object is opened.
+
+    Raises ArtifactUnavailable when the name is not a plain image file name,
+    when the document has never been parsed, or when the run recorded no
+    bucket.
+    """
+    if not _IMAGE_NAME.match(name):
+        raise ArtifactUnavailable(f"{name!r} is not an image file name")
+
+    parsed = latest_parsed_doc(db, document.id)
+    if parsed is None:
+        raise ArtifactUnavailable(f"{document.filename} has not been parsed")
+    if not parsed.bucket:
+        raise ArtifactUnavailable(
+            f"parse run {parsed.id} recorded no bucket to read from"
+        )
+
+    return ParseImage(
+        bucket=parsed.bucket,
+        key=f"{run_prefix(parsed, document)}{IMAGES_FOLDER}/{name}",
+    )
+
+
 def load_artifact_text(artifact: ParseArtifact) -> ArtifactText:
     """Fetch an artifact and prepare it for the browser.
 
@@ -184,9 +252,19 @@ def load_artifact_text(artifact: ParseArtifact) -> ArtifactText:
             error=f"Invalid JSON: {exc.msg} (line {exc.lineno}, column {exc.colno}).",
         )
 
+    body = json.dumps(parsed_json, indent=2, ensure_ascii=False)
+    if not isinstance(parsed_json, list):
+        return ArtifactText(artifact=artifact, body=body, error=None)
+
+    kinds = Counter(
+        block.get("type") for block in parsed_json if isinstance(block, dict)
+    )
     return ArtifactText(
         artifact=artifact,
-        body=json.dumps(parsed_json, indent=2, ensure_ascii=False),
+        body=body,
         error=None,
-        blocks=len(parsed_json) if isinstance(parsed_json, list) else None,
+        blocks=len(parsed_json),
+        tables=kinds["table"],
+        charts=kinds["chart"],
+        images=kinds["image"],
     )

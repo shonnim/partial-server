@@ -22,6 +22,7 @@ from app.services.parse_artifacts import (
     ParseArtifact,
     load_artifact_text,
     resolve_artifact,
+    resolve_image,
 )
 from app.storage import ObjectNotFound, open_object
 from app.templating import templates
@@ -164,6 +165,44 @@ def _artifact_or_404(
         return doc, resolve_artifact(db, doc, kind)
     except ArtifactUnavailable as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+
+@router.get("/{document_id}/parsed/images/{name}", name="document_parsed_image")
+def document_parsed_image(
+    document_id: uuid.UUID,
+    name: str,
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """Stream one image of a parse run out of RustFS.
+
+    Declared ahead of the ``{kind}`` routes so ``images`` is never read as a
+    kind. The images are content-addressed, so a browser may keep one for a
+    while: the same name never comes to mean a different picture.
+    """
+    doc = get_document(db, document_id)
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "document not found")
+
+    try:
+        image = resolve_image(db, doc, name)
+    except ArtifactUnavailable as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    try:
+        obj = open_object(image.bucket, image.key)
+    except ObjectNotFound as exc:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, f"no image named {name} in this parse run"
+        ) from exc
+
+    headers = {
+        "Content-Disposition": f"inline; filename*=UTF-8''{quote(image.filename)}",
+        "Cache-Control": "private, max-age=3600",
+    }
+    if obj.content_length is not None:
+        headers["Content-Length"] = str(obj.content_length)
+
+    return StreamingResponse(obj.chunks, media_type=image.media_type, headers=headers)
 
 
 @router.get(
