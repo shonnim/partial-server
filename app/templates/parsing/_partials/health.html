@@ -1,0 +1,45 @@
+{#
+  The parsing service's health, as the rows of the status box.
+
+  Every number carries data-stat and data-value so parsing.js can flash the
+  ones that changed between two checks while Auto check is on. A service that
+  could not be reached renders as the box too, in the down state, with the
+  reason underneath.
+#}
+{% if error %}
+  <div class="service-state is-down" data-stat="status" data-value="down">
+    <span class="state-dot"></span>
+    <span class="state-label">unreachable</span>
+  </div>
+  <p class="side-error">{{ error }}</p>
+{% else %}
+  <div class="service-state {{ 'is-up' if health.healthy else 'is-down' }}"
+       data-stat="status" data-value="{{ health.status }}">
+    <span class="state-dot"></span>
+    <span class="state-label">{{ health.status }}</span>
+    {% if health.version %}<span class="state-version">v{{ health.version }}</span>{% endif %}
+  </div>
+  <dl class="stat-grid">
+    <div class="stat-cell is-wait{{ ' has-work' if health.queued_tasks }}">
+      <dt>queued</dt>
+      <dd data-stat="queued" data-value="{{ health.queued_tasks }}">{{ health.queued_tasks }}</dd>
+    </div>
+    <div class="stat-cell is-busy{{ ' has-work' if health.processing_tasks }}">
+      <dt>processing</dt>
+      <dd data-stat="processing" data-value="{{ health.processing_tasks }}">{{ health.processing_tasks }}</dd>
+    </div>
+    <div class="stat-cell is-ok">
+      <dt>completed</dt>
+      <dd data-stat="completed" data-value="{{ health.completed_tasks }}">{{ health.completed_tasks }}</dd>
+    </div>
+    <div class="stat-cell is-fail{{ ' has-work' if health.failed_tasks }}">
+      <dt>failed</dt>
+      <dd data-stat="failed" data-value="{{ health.failed_tasks }}">{{ health.failed_tasks }}</dd>
+    </div>
+    <div class="stat-cell is-wide">
+      <dt>max concurrent</dt>
+      <dd data-stat="max_concurrent" data-value="{{ health.max_concurrent_requests }}">{{ health.max_concurrent_requests }}</dd>
+    </div>
+  </dl>
+{% endif %}
+<p class="side-checked">checked <time data-checked>just now</time></p>

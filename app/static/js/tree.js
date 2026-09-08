@@ -140,6 +140,50 @@
     updateCounts();
   };
 
+  // ---- the selection, as the server wants it ------------------------------
+
+  /** Gather ticks into ids and folder paths, walking down from `node`.
+   *
+   *  Selection is sent as ids *and* folder paths. Levels load lazily, so a
+   *  folder can be ticked while its documents have never been fetched — the
+   *  browser can only name the folder and let the server resolve it. Walking
+   *  from the root and stopping at the topmost fully-checked node keeps the
+   *  two lists disjoint.
+   */
+  function collect(node, picked) {
+    const box = boxOf(node);
+    if (!box) return;
+
+    if (isFile(node)) {
+      if (box.checked && selectable(box)) picked.ids.push(node.dataset.id);
+      return;
+    }
+    if (box.checked && !box.indeterminate) {
+      // A path is resolved server-side into every document beneath it, which
+      // would take back the rows that opted out. Once the browser can see one,
+      // the children are named individually instead.
+      if (!hasOptedOut(node)) {
+        picked.paths.push(node.dataset.path);
+        return;
+      }
+      directNodes(node).forEach((child) => collect(child, picked));
+      return;
+    }
+    if (box.indeterminate) directNodes(node).forEach((child) => collect(child, picked));
+  }
+
+  /** The current selection, as the JSON body the batch endpoints expect. */
+  window.treeSelectionJSON = () => {
+    const picked = { ids: [], paths: [] };
+    const root = document.getElementById("tree-root");
+    if (root) {
+      Array.from(root.children)
+        .filter((li) => li.classList.contains("tree-node"))
+        .forEach((li) => collect(li, picked));
+    }
+    return JSON.stringify(picked);
+  };
+
   // ---- events --------------------------------------------------------------
 
   document.addEventListener("change", (event) => {

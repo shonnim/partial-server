@@ -1,50 +1,10 @@
-// The Headers screen: turning the tree's ticks into a request, repainting the
-// rows a check just settled, and walking the Pages queue one document at a
-// time with a clock running.
+// The Headers screen: repainting the rows a check just settled, and walking
+// the Pages queue one document at a time with a clock running.
 //
-// Selection is sent as ids *and* folder paths. Levels load lazily, so a folder
-// can be ticked while its documents have never been fetched — the browser can
-// only name the folder and let the server resolve it. Walking from the root and
-// stopping at the topmost fully-checked node keeps the two lists disjoint.
+// The selection itself — ids and folder paths, as the server wants them — is
+// serialised by tree.js (window.treeSelectionJSON), shared with Parsing.
 (() => {
   "use strict";
-
-  const boxOf = (node) => node.querySelector(":scope > .tree-row > .tree-check");
-  const isFile = (node) => node.classList.contains("is-file");
-
-  function directNodes(node) {
-    const list = node.querySelector(":scope > .tree-children");
-    if (!list) return [];
-    return Array.from(list.children).filter((li) => li.classList.contains("tree-node"));
-  }
-
-  /** Whether this folder is holding a loaded row that opted out of selection. */
-  function hasOptedOut(node) {
-    const list = node.querySelector(":scope > .tree-children");
-    return Boolean(list && list.querySelector(".tree-check:disabled"));
-  }
-
-  function collect(node, picked) {
-    const box = boxOf(node);
-    if (!box) return;
-
-    if (isFile(node)) {
-      if (box.checked && !box.disabled) picked.ids.push(node.dataset.id);
-      return;
-    }
-    if (box.checked && !box.indeterminate) {
-      // A path is resolved server-side into every document beneath it, which
-      // would take back the rows that opted out. Once the browser can see one,
-      // the children are named individually instead.
-      if (!hasOptedOut(node)) {
-        picked.paths.push(node.dataset.path);
-        return;
-      }
-      directNodes(node).forEach((child) => collect(child, picked));
-      return;
-    }
-    if (box.indeterminate) directNodes(node).forEach((child) => collect(child, picked));
-  }
 
   /** The extraction method currently chosen in the toolbar. */
   window.headerMethod = () => {
@@ -56,18 +16,6 @@
   window.headerPages = () => {
     const input = document.getElementById("header-pages");
     return input ? input.value : "";
-  };
-
-  /** The current selection, as the JSON body the check endpoint expects. */
-  window.treeSelectionJSON = () => {
-    const picked = { ids: [], paths: [] };
-    const root = document.getElementById("tree-root");
-    if (root) {
-      Array.from(root.children)
-        .filter((li) => li.classList.contains("tree-node"))
-        .forEach((li) => collect(li, picked));
-    }
-    return JSON.stringify(picked);
   };
 
   // ---- the method picker ---------------------------------------------------

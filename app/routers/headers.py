@@ -2,11 +2,9 @@ import uuid
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
-from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.schemas.header import TreeSelection
 from app.services.documents import get_document
 from app.services.header_extraction import (
     ExtractionError,
@@ -26,8 +24,8 @@ from app.services.header_pages import (
 from app.services.headers import MAX_CHECK_BATCH, check_has_header, load_content_list
 from app.services.tree import (
     DEFAULT_FILE_PAGE,
-    documents_in_folders,
     list_level,
+    resolve_selection,
     root_totals,
 )
 from app.templating import templates
@@ -44,31 +42,7 @@ def _result(request: Request, context: dict) -> HTMLResponse:
 def _resolve_selection(
     db: Session, raw: str
 ) -> tuple[list[uuid.UUID] | None, str | None]:
-    """Turn the posted selection into document ids, or explain why it cannot.
-
-    Folder ticks are resolved before the cap is applied so the limit covers the
-    real work, not just the ids the browser happened to know about.
-    """
-    try:
-        picked = TreeSelection.model_validate_json(raw or "{}")
-    except ValidationError:
-        return None, "The selection could not be read."
-
-    if picked.is_empty:
-        return None, "Nothing selected."
-
-    doc_ids = list(
-        dict.fromkeys(
-            [*picked.ids, *documents_in_folders(db, picked.paths, limit=MAX_CHECK_BATCH)]
-        )
-    )
-    if len(doc_ids) > MAX_CHECK_BATCH:
-        return None, (
-            f"{len(doc_ids)} documents selected. "
-            f"Check at most {MAX_CHECK_BATCH} at a time."
-        )
-
-    return doc_ids, None
+    return resolve_selection(db, raw, limit=MAX_CHECK_BATCH)
 
 
 def _document_or_404(db: Session, document_id: uuid.UUID):

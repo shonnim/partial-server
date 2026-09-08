@@ -2,15 +2,27 @@
   Document rows for one folder, plus the "load more" button when the folder
   holds more than a page of them. The button replaces itself with the next
   batch, so a folder of 800 files still arrives 50 at a time.
+
+  The box is what decides whether a document can go into a run. A document
+  whose latest parse already used the VLM engine has nothing to gain from
+  another pass, so its box is disabled and tree.js leaves it out of folder
+  ticks and counts. Everything else — never parsed, or parsed by another
+  engine — is selectable.
 #}
 {% for file in level.files %}
-  <li class="tree-node is-file" data-id="{{ file.id }}">
+  {% set is_vlm = file.parse_backend == 'vlm-engine' %}
+  <li class="tree-node is-file" data-id="{{ file.id }}" data-backend="{{ file.parse_backend or '' }}">
     <div class="tree-row">
       <input type="checkbox" class="tree-check" data-kind="file"
-             value="{{ file.id }}" aria-label="Select {{ file.filename }}">
+             value="{{ file.id }}" aria-label="Select {{ file.filename }}"
+             {% if is_vlm %}disabled title="Already parsed with vlm-engine"{% endif %}>
       <span class="tree-icon">📄</span>
       <span class="tree-name" title="{{ file.filename }}">{{ file.filename }}</span>
       <span class="tree-badges">
+        {#- Which engine produced the current output. Kept on one line so an
+            unparsed document leaves the span empty and `.parse-backend:empty`
+            collapses it. -#}
+        <span class="parse-backend">{% if file.parse_backend %}<span class="pill backend {{ 'vlm' if is_vlm else 'hybrid' }}">{{ file.parse_backend }}</span>{% endif %}</span>
         <span class="pill {{ 'ok' if file.status.value == 'COMPLETED' else 'fail' if file.status.value == 'FAILED' else 'total' }}">
           {{ '✓' if file.status.value == 'COMPLETED' else '✗' if file.status.value == 'FAILED' else '•' }}
           {{ file.status.value|title }}
@@ -21,6 +33,7 @@
            href="{{ url_for('document_viewer', document_id=file.id) }}">PDF</a>
         {#- Parse output. Kept in the row but disabled until a run has produced
             it, so the tree also reads as "what has been parsed so far". -#}
+        <span class="parse-links">
         {% if file.parsed %}
           <a class="btn tree-view btn-json" data-viewer
              href="{{ url_for('document_parsed_viewer', document_id=file.id, kind='json') }}">JSON</a>
@@ -30,6 +43,7 @@
           <span class="btn tree-view is-disabled" title="Not parsed yet">JSON</span>
           <span class="btn tree-view is-disabled" title="Not parsed yet">MD</span>
         {% endif %}
+        </span>
       </span>
     </div>
   </li>

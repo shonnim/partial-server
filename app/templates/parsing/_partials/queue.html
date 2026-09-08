@@ -1,0 +1,68 @@
+{#
+  The outcome of a "Parse docs" click: the selection, with the documents that
+  already went through the VLM engine set aside. What is left is a live work
+  queue — parsing.js uploads the rows one after another, polls every task in
+  flight on a clock, and swaps each reply into the status cell — while the
+  strip above keeps time.
+
+  Errors come back as this card too: the caller is a button on the page, and
+  a 4xx would leave the panel blank.
+#}
+{% if error %}
+  <div class="card check-result is-error">{{ error }}</div>
+{% else %}
+  <div class="card check-result" data-run="parse" data-poll-seconds="{{ poll_seconds }}">
+    <div class="check-summary">
+      <span class="pill ok">✓ {{ queue.eligible|length }} to parse</span>
+      {% if queue.skipped %}
+        <span class="pill total">↷ {{ queue.skipped|length }} skipped, already vlm-engine</span>
+      {% endif %}
+    </div>
+
+    {% if queue.eligible %}
+      {#- The clock for the whole run. Filled in by parsing.js every second:
+          elapsed as m:ss, how far down the queue it is, and the tally at the
+          end. Stop sends nothing more and lets what is in flight finish. -#}
+      <div class="run-strip" data-run-strip>
+        <span class="run-timer" data-run-timer>0:00</span>
+        <span class="pill total" data-run-state>⏳ starting</span>
+        <span class="run-progress" data-run-progress>0 / {{ queue.eligible|length }}</span>
+        <span class="run-tally" data-run-tally></span>
+        <span class="toolbar-spacer"></span>
+        <button type="button" class="btn ghost" data-run-stop>■ Stop</button>
+      </div>
+
+      <ul class="gate-queue">
+        {% for candidate in queue.eligible %}
+          <li class="gate-row" data-doc-id="{{ candidate.id }}"
+              data-submit-url="{{ url_for('parsing_submit', document_id=candidate.id) }}"
+              data-poll-url="{{ url_for('parsing_poll', document_id=candidate.id) }}">
+            <span class="gate-name" title="{{ candidate.filename }}">{{ candidate.filename }}</span>
+            <span class="gate-status">
+              <span class="pill total">queued</span>
+            </span>
+            <span class="gate-actions">
+              {% if candidate.backend %}
+                <span class="pill backend hybrid" title="latest parse">{{ candidate.backend }}</span>
+              {% else %}
+                <span class="pill total">never parsed</span>
+              {% endif %}
+              <a class="btn btn-pdf" data-viewer
+                 href="{{ url_for('document_viewer', document_id=candidate.id) }}">PDF</a>
+            </span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="check-note">Everything selected has already been parsed with vlm-engine.</p>
+    {% endif %}
+
+    {% if queue.skipped %}
+      <ul class="check-failures">
+        {% for candidate in queue.skipped %}
+          <li><strong>{{ candidate.filename }}</strong> — {{ candidate.reason }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+{% endif %}

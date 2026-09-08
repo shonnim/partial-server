@@ -1000,6 +1000,7 @@ dialog.modal-manual { width: min(820px, 94vw); height: min(700px, 88vh); }
 .gate-status {
   display: flex;
   flex: 1 1 auto;
+  flex-wrap: wrap;
   min-width: 0;
   align-items: center;
   justify-content: flex-end;
@@ -1016,3 +1017,190 @@ dialog.modal-manual { width: min(820px, 94vw); height: min(700px, 88vh); }
 }
 .gate-row.is-running { background: var(--accent-soft); }
 .pill.is-live [data-row-timer] { font-variant-numeric: tabular-nums; }
+
+/* ---------- parsing page ---------- */
+
+/* The tree on the left, the run settings on the right. The side panel keeps
+   its place while the tree scrolls, so the service box stays in view during
+   a long run. */
+.parsing-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 18px;
+  align-items: start;
+}
+.parsing-main { min-width: 0; }
+.side-panel {
+  position: sticky;
+  top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+@media (max-width: 1100px) {
+  .parsing-layout { grid-template-columns: 1fr; }
+  .side-panel { position: static; }
+}
+
+.side-box {
+  padding: 14px 16px;
+  transition: border-color var(--ease), box-shadow var(--ease);
+}
+.side-box-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.side-box-title { font-size: 12.5px; font-weight: 700; letter-spacing: .2px; }
+.side-box-actions { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.side-note { margin: 0; color: var(--ink-faint); font-size: 12.5px; }
+.side-error {
+  margin: 8px 0 0;
+  color: var(--fail);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.side-checked { margin: 10px 0 0; color: var(--ink-faint); font-size: 11.5px; }
+
+/* Live: the box wears a green ring, the badge pulses, and each check that
+   comes back flashes the ring once — in the accent colour when a number
+   moved. */
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ok);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.live-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+  animation: live-pulse 1.6s ease-out infinite;
+}
+@keyframes live-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(47, 147, 103, .45); }
+  70%  { box-shadow: 0 0 0 8px rgba(47, 147, 103, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(47, 147, 103, 0); }
+}
+.side-box.is-live {
+  border-color: color-mix(in srgb, var(--ok) 38%, #fff);
+  box-shadow: 0 0 0 4px var(--ok-soft), var(--shadow);
+}
+.side-box.is-live.did-check { animation: box-check .9s ease-out; }
+.side-box.is-live.did-change { animation: box-change .9s ease-out; }
+@keyframes box-check {
+  0%   { box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 35%, #fff), var(--shadow); }
+  100% { box-shadow: 0 0 0 4px var(--ok-soft), var(--shadow); }
+}
+@keyframes box-change {
+  0%   { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 45%, #fff), var(--shadow); }
+  100% { box-shadow: 0 0 0 4px var(--ok-soft), var(--shadow); }
+}
+.btn-auto[aria-pressed="true"] {
+  --btn-tint: var(--ok);
+  border-color: color-mix(in srgb, var(--btn-tint) 40%, #fff);
+  background: color-mix(in srgb, var(--btn-tint) 10%, #fff);
+  color: var(--btn-tint);
+}
+
+/* The service's own word on itself, then the counters. */
+.service-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+  font-size: 12.5px;
+  font-weight: 650;
+  text-transform: capitalize;
+}
+.service-state.is-up { background: var(--ok-soft); color: var(--ok); }
+.service-state.is-down { background: var(--fail-soft); color: var(--fail); }
+.state-dot { width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+.service-state.is-up .state-dot { animation: live-pulse 1.6s ease-out infinite; }
+.state-version {
+  margin-left: auto;
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+.stat-cell {
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+  transition: border-color var(--ease), background var(--ease);
+}
+.stat-cell.is-wide { grid-column: 1 / -1; }
+.stat-cell dt {
+  color: var(--ink-soft);
+  font-size: 11px;
+  letter-spacing: .3px;
+  text-transform: uppercase;
+}
+.stat-cell dd {
+  display: inline-block;
+  margin: 2px 0 0;
+  font-size: 20px;
+  font-weight: 680;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.3px;
+  transform-origin: left center;
+}
+.stat-cell.is-wait dd { color: var(--tint-json); }
+.stat-cell.is-busy dd { color: var(--accent); }
+.stat-cell.is-ok dd { color: var(--ok); }
+.stat-cell.is-fail dd { color: var(--fail); }
+/* Work in the pipe lights the cell up, so a glance says whether the service
+   is idle without reading a number. */
+.stat-cell.is-wait.has-work { border-color: color-mix(in srgb, var(--tint-json) 40%, #fff); background: color-mix(in srgb, var(--tint-json) 8%, #fff); }
+.stat-cell.is-busy.has-work { border-color: color-mix(in srgb, var(--accent) 40%, #fff); background: var(--accent-soft); }
+.stat-cell.is-fail.has-work { border-color: color-mix(in srgb, var(--fail) 40%, #fff); background: var(--fail-soft); }
+.stat-cell dd.bump { animation: stat-bump .6s ease-out; }
+@keyframes stat-bump {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(1.22); }
+  100% { transform: scale(1); }
+}
+
+/* Which engine produced a document's current output. */
+.parse-backend:empty { display: none; }
+.parse-links { display: contents; }
+.pill.backend.vlm {
+  background: color-mix(in srgb, var(--tint-manual) 12%, #fff);
+  color: var(--tint-manual);
+}
+.pill.backend.hybrid {
+  background: color-mix(in srgb, var(--tint-json) 12%, #fff);
+  color: var(--tint-json);
+}
+
+/* Parse docs: filled like the one action a dialog performs, and visibly busy
+   for as long as the queue it started is live. */
+.btn-parse { --btn-tint: var(--accent); }
+.btn-primary.btn-parse.is-loading[disabled] {
+  background: color-mix(in srgb, var(--accent) 62%, #fff);
+  color: #fff;
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.btn-spinner {
+  width: 12px; height: 12px;
+  border: 2px solid rgba(255, 255, 255, .4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}

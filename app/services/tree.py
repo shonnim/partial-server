@@ -15,10 +15,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from math import ceil
 
+from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models.document import DocumentStatus, HasHeader
+from app.schemas.header import TreeSelection
 
 # Files listed per folder before the UI has to ask for more.
 DEFAULT_FILE_PAGE = 50
@@ -61,6 +63,11 @@ class FileNode:
     # Whether a parse run has recorded output for this document, which is what
     # decides if the JSON / MD buttons on the row do anything.
     parsed: bool
+    # The backend and status of the latest parse run, or None when there has
+    # never been one. The Parsing page reads the backend to decide whether a
+    # document still needs to go through the VLM engine.
+    parse_backend: str | None = None
+    parse_status: DocumentStatus | None = None
 
 
 @dataclass(frozen=True)
@@ -156,16 +163,26 @@ def folder_files(
 
     rows = db.execute(
         text(f"""
-            SELECT id, filename, size_bytes, pages, status, has_header,
+            SELECT documents.id, documents.filename, documents.size_bytes,
+                   documents.pages, documents.status, documents.has_header,
                    (
                        SELECT count(*) FROM headers h WHERE h.doc_id = documents.id
                    ) AS header_count,
                    EXISTS (
                        SELECT 1 FROM parsed_docs p WHERE p.doc_id = documents.id
-                   ) AS parsed
+                   ) AS parsed,
+                   latest.backend AS parse_backend,
+                   latest.status AS parse_status
             FROM documents
+            LEFT JOIN LATERAL (
+                SELECT p.backend, p.status
+                FROM parsed_docs p
+                WHERE p.doc_id = documents.id
+                ORDER BY p.id DESC
+                LIMIT 1
+            ) AS latest ON true
             WHERE {predicate}
-            ORDER BY filename, id
+            ORDER BY documents.filename, documents.id
             LIMIT :limit OFFSET :offset
         """),
         {"path": path, "limit": limit, "offset": offset},
@@ -181,6 +198,8 @@ def folder_files(
             has_header=HasHeader(r.has_header),
             header_count=r.header_count,
             parsed=r.parsed,
+            parse_backend=r.parse_backend,
+            parse_status=DocumentStatus(r.parse_status) if r.parse_status else None,
         )
         for r in rows
     ]
@@ -246,6 +265,34 @@ def documents_in_folders(
     ).all()
 
     return [r.id for r in rows]
+
+
+def resolve_selection(
+    db: Session, raw: str, *, limit: int
+) -> tuple[list[uuid.UUID] | None, str | None]:
+    """Turn a posted tree selection into document ids, or explain why it cannot.
+
+    Folder ticks are resolved before the cap is applied so the limit covers the
+    real work, not just the ids the browser happened to know about. Returns
+    ``(ids, None)`` on success and ``(None, reason)`` otherwise.
+    """
+    try:
+        picked = TreeSelection.model_validate_json(raw or "{}")
+    except ValidationError:
+        return None, "The selection could not be read."
+
+    if picked.is_empty:
+        return None, "Nothing selected."
+
+    doc_ids = list(
+        dict.fromkeys([*picked.ids, *documents_in_folders(db, picked.paths, limit=limit)])
+    )
+    if len(doc_ids) > limit:
+        return None, (
+            f"{len(doc_ids)} documents selected. Pick at most {limit} at a time."
+        )
+
+    return doc_ids, None
 
 
 def page_count(total: int, per_page: int) -> int:

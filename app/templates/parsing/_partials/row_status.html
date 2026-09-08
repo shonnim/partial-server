@@ -1,0 +1,36 @@
+{#
+  The status cell of one queue row after a submit or a poll.
+
+  While the task is still in flight the cell carries data-task-id, which is
+  what tells parsing.js to ask again after the interval; a settled cell has
+  none and carries data-done instead. A completed cell also carries the
+  viewer links, so the tree row can be brought up to date without a reload.
+#}
+{% if step.in_flight %}
+  <span class="pill total is-live" data-task-id="{{ step.task_id }}" data-state="{{ step.state }}">
+    {% if step.state == 'pending' %}⏳ pending{% else %}⚙ processing{% endif %}
+    · <span data-row-timer>0:00</span>
+  </span>
+  {% if step.queued_ahead %}
+    <span class="pill total">{{ step.queued_ahead }} ahead</span>
+  {% endif %}
+  {% if step.resumed %}
+    <span class="pill total" title="A task from an earlier click was still running and was picked up">resumed</span>
+  {% endif %}
+  {% if step.error %}
+    <span class="gate-reason" title="{{ step.error }}">{{ step.error }}</span>
+  {% endif %}
+{% elif step.ok %}
+  <span class="pill ok" data-done data-doc-id="{{ step.id }}"
+        data-json-url="{{ url_for('document_parsed_viewer', document_id=step.id, kind='json') }}"
+        data-md-url="{{ url_for('document_parsed_viewer', document_id=step.id, kind='md') }}">
+    ✓ parsed
+  </span>
+  <span class="pill total">{{ step.artifacts }} file{{ '' if step.artifacts == 1 else 's' }} · {{ step.size_bytes|filesize }}</span>
+  {% if step.seconds is not none %}
+    <span class="pill total" title="download and store">{{ '%.0f'|format(step.seconds) }}s</span>
+  {% endif %}
+{% else %}
+  <span class="pill fail" data-done data-doc-id="{{ step.id }}">✗ failed</span>
+  <span class="gate-reason" title="{{ step.error }}">{{ step.error }}</span>
+{% endif %}

@@ -35,6 +35,24 @@ class Settings(BaseSettings):
         default=600.0, alias="DOC_EXTRACT_TIMEOUT_SECONDS"
     )
 
+    # The MinerU service the Parsing page submits whole documents to. Tasks are
+    # asynchronous there: submit, poll, then fetch a zip of the output.
+    mineru_base_url: str = Field(
+        default="https://cl1.gpuhub.nhncloud.com:50128/ZP4VnibPzP/mineru",
+        alias="MINERU_BASE_URL",
+    )
+    # Uploading a PDF is the slow request; polling and health are quick.
+    mineru_submit_timeout_seconds: float = Field(
+        default=600.0, alias="MINERU_SUBMIT_TIMEOUT_SECONDS"
+    )
+    mineru_poll_timeout_seconds: float = Field(
+        default=30.0, alias="MINERU_POLL_TIMEOUT_SECONDS"
+    )
+    # The result is a zip of markdown, JSON, and every page crop as an image.
+    mineru_result_timeout_seconds: float = Field(
+        default=600.0, alias="MINERU_RESULT_TIMEOUT_SECONDS"
+    )
+
     @property
     def sqlalchemy_url(self) -> str:
         """DATABASE_URL with the psycopg (v3) driver made explicit.

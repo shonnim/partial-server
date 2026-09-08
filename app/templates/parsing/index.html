@@ -9,19 +9,78 @@
 {% endblock %}
 
 {% block content %}
-  <div class="card tree-card">
-    <div class="tree-head">
-      <span class="tree-head-label">📚 Corpus</span>
-      <span class="tree-badges" id="tree-root-badges" data-total="{{ total }}">
-        {% if failed %}<span class="pill fail">✗ {{ "{:,}".format(failed) }}</span>{% endif %}
-        <span class="pill total">{{ "{:,}".format(total) }}</span>
-        <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
-      </span>
+  <div class="parsing-layout">
+    <div class="parsing-main">
+      <div class="card toolbar">
+        {#- Disabled and spinning for as long as the queue it starts is live;
+            parsing.js owns that state. -#}
+        <button type="button" class="btn btn-primary btn-parse" id="btn-parse"
+                data-label="⚙ Parse docs"
+                hx-post="{{ url_for('parsing_run') }}"
+                hx-vals="js:{selection: window.treeSelectionJSON()}"
+                hx-target="#parse-result"
+                hx-swap="innerHTML"
+                hx-indicator="#parse-spinner">
+          ⚙ Parse docs
+        </button>
+        <span class="spinner" id="parse-spinner"></span>
+        <span class="toolbar-spacer"></span>
+        <span class="toolbar-count">
+          Uploaded to <strong>{{ backend }}</strong> one after another, parsed in parallel ·
+          already parsed with it are skipped · at most <strong>{{ max_batch }}</strong> per click
+        </span>
+      </div>
+
+      <div id="parse-result"></div>
+
+      <div class="card tree-card">
+        <div class="tree-head">
+          <span class="tree-head-label">📚 Corpus</span>
+          <span class="tree-badges" id="tree-root-badges" data-total="{{ total }}">
+            {% if failed %}<span class="pill fail">✗ {{ "{:,}".format(failed) }}</span>{% endif %}
+            <span class="pill total">{{ "{:,}".format(total) }}</span>
+            <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
+          </span>
+        </div>
+
+        <ul class="tree tree-children" id="tree-root">
+          {% include "parsing/_partials/level.html" %}
+        </ul>
+      </div>
     </div>
 
-    <ul class="tree tree-children" id="tree-root">
-      {% include "parsing/_partials/level.html" %}
-    </ul>
+    {#- Settings that shape a run sit beside the tree. The first box is the
+        parsing service itself: one check on demand, or a check every few
+        seconds while Auto check is on. -#}
+    <aside class="side-panel">
+      <section class="card side-box" id="service-box" data-health-seconds="{{ health_seconds }}">
+        <div class="side-box-head">
+          <span class="side-box-title">🩺 Service status</span>
+          <span class="live-badge" id="live-badge" hidden>
+            <span class="live-dot"></span> live · every {{ health_seconds }}s
+          </span>
+        </div>
+        <div class="side-box-actions">
+          <button type="button" class="btn" id="btn-check-now"
+                  hx-get="{{ url_for('parsing_health') }}"
+                  hx-target="#service-status"
+                  hx-swap="innerHTML"
+                  hx-indicator="#health-spinner">
+            ⟳ Check now
+          </button>
+          <button type="button" class="btn btn-auto" id="btn-auto-check" aria-pressed="false">
+            ▶ Auto check
+          </button>
+          <span class="spinner" id="health-spinner"></span>
+        </div>
+        <div id="service-status" class="service-status"
+             hx-get="{{ url_for('parsing_health') }}"
+             hx-trigger="load"
+             hx-swap="innerHTML">
+          <p class="side-note">Checking…</p>
+        </div>
+      </section>
+    </aside>
   </div>
 
   {#- The viewer pop-up, same as on the documents list. -#}
@@ -29,4 +88,5 @@
 
   <script src="{{ static_url('js/viewer-modal.js') }}" defer></script>
   <script src="{{ static_url('js/tree.js') }}" defer></script>
+  <script src="{{ static_url('js/parsing.js') }}" defer></script>
 {% endblock %}

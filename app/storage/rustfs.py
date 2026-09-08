@@ -4,7 +4,7 @@ Routers and services go through this module. Keeping the client behind a
 function is also what makes storage fixable in tests.
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -20,6 +20,9 @@ _STREAM_CHUNK = 64 * 1024
 
 # Error codes RustFS returns when the key (or the bucket) does not exist.
 _MISSING_CODES = {"NoSuchKey", "NoSuchBucket", "404"}
+
+# The most keys one DeleteObjects call may name, per the S3 API.
+_DELETE_BATCH = 1000
 
 
 class ObjectNotFound(LookupError):
@@ -135,3 +138,55 @@ def open_object(bucket: str, key: str) -> ObjectStream:
         content_length=response.get("ContentLength"),
         chunks=chunks(),
     )
+
+
+def list_all_objects(bucket: str, prefix: str) -> list[ObjectSummary]:
+    """Every object under ``prefix``, subfolders included, across all pages.
+
+    The recursive counterpart of ``list_objects``. It is meant for one run
+    directory — a few text files and a folder of page crops — not for walking
+    a bucket; the caller is expected to hand it a prefix that ends in ``/``.
+    """
+    paginator = get_client().get_paginator("list_objects_v2")
+    found: list[ObjectSummary] = []
+    try:
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            found.extend(
+                ObjectSummary(key=o["Key"], size=o["Size"])
+                for o in page.get("Contents", [])
+            )
+    except ClientError as exc:
+        if missing := _as_missing(exc, bucket, prefix):
+            raise missing from exc
+        raise
+    return found
+
+
+def delete_objects(bucket: str, keys: Iterable[str]) -> int:
+    """Delete the named keys, in batches of at most 1000. Returns how many.
+
+    A key that no longer exists is not an error — deleting is idempotent — but
+    any key the service refuses to delete is raised, since leaving half a run
+    directory behind next to a fresh one is worse than stopping.
+    """
+    keys = list(keys)
+    client = get_client()
+    for start in range(0, len(keys), _DELETE_BATCH):
+        batch = keys[start : start + _DELETE_BATCH]
+        response = client.delete_objects(
+            Bucket=bucket,
+            Delete={"Objects": [{"Key": k} for k in batch], "Quiet": True},
+        )
+        errors = response.get("Errors") or []
+        if errors:
+            first = errors[0]
+            raise RuntimeError(
+                f"{len(errors)} object(s) could not be deleted from {bucket}; "
+                f"first: {first.get('Key')}: {first.get('Message')}"
+            )
+    return len(keys)
+
+
+def put_object(bucket: str, key: str, body: bytes, *, content_type: str) -> None:
+    """Write one object in full."""
+    get_client().put_object(Bucket=bucket, Key=key, Body=body, ContentType=content_type)
