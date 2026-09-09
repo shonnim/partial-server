@@ -1,0 +1,60 @@
+{#
+  Document rows for one folder, plus the "load more" button when the folder
+  holds more than a page of them.
+
+  The box is what decides whether a document can go into a run. A document
+  that already has content rows stored is out of the selection: its box is
+  disabled and tree.js leaves it out of folder ticks and counts. A run
+  replaces a document's rows rather than adding to them, so sweeping a
+  sectioned document into a batch is never what someone meant.
+
+  The two counts on the row are the two halves of this screen: how many
+  headers there are to file under, and how many blocks have been filed.
+#}
+{% for file in level.files %}
+  <li class="tree-node is-file" data-id="{{ file.id }}">
+    <div class="tree-row">
+      <input type="checkbox" class="tree-check" data-kind="file"
+             value="{{ file.id }}" aria-label="Select {{ file.filename }}"
+             {% if file.content_count %}disabled
+             title="{{ file.content_count }} block{{ '' if file.content_count == 1 else 's' }} already stored"{% endif %}>
+      <span class="tree-icon">📄</span>
+      <span class="tree-name" title="{{ file.filename }}">{{ file.filename }}</span>
+      <span class="tree-badges">
+        {#- Rendered on one line: `.header-count:empty` collapses it when
+            nothing is stored. -#}
+        <span class="header-count" data-count="{{ file.header_count }}">{% if file.header_count %}<span class="pill headers">{{ file.header_count }} header{{ '' if file.header_count == 1 else 's' }}</span>{% endif %}</span>
+        {#- Same rule: empty means "not sectioned yet". sections.js fills it
+            in when a run finishes on this row. -#}
+        <span class="content-count" data-count="{{ file.content_count }}">{% if file.content_count %}<span class="pill contents">{{ file.content_count }} block{{ '' if file.content_count == 1 else 's' }}</span>{% endif %}</span>
+        <span class="pill total">{{ file.pages if file.pages is not none else '—' }} p</span>
+        <span class="pill total">{{ file.size_bytes|filesize }}</span>
+
+        <a class="btn tree-view btn-outline{{ ' is-empty' if not file.header_count }}"
+           data-viewer
+           title="{{ file.header_count }} header{{ '' if file.header_count == 1 else 's' }} stored"
+           href="{{ url_for('header_outline', document_id=file.id) }}">Headers</a>
+        <a class="btn tree-view btn-pdf" data-viewer
+           href="{{ url_for('document_viewer', document_id=file.id) }}">PDF</a>
+        {#- The content list is what the run reads, so it sits on the row. -#}
+        {% if file.parsed %}
+          <a class="btn tree-view btn-json" data-viewer
+             href="{{ url_for('document_parsed_viewer', document_id=file.id, kind='json') }}">JSON</a>
+        {% else %}
+          <span class="btn tree-view is-disabled" title="Not parsed yet">JSON</span>
+        {% endif %}
+      </span>
+    </div>
+  </li>
+{% endfor %}
+
+{% if level.remaining_files %}
+  <li class="tree-more">
+    <button type="button" class="btn"
+            hx-get="{{ url_for('sections_nodes') }}?path={{ level.path|urlencode }}&offset={{ level.next_offset }}"
+            hx-target="closest .tree-more"
+            hx-swap="outerHTML">
+      ↓ Load {{ level.remaining_files }} more
+    </button>
+  </li>
+{% endif %}

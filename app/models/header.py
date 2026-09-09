@@ -56,10 +56,13 @@ class HeaderContent(Base):
     __tablename__ = "header_contents"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    header_id: Mapped[int] = mapped_column(
+    # NULL for a block that precedes the document's first header — front
+    # matter, the contents page — which belongs to the document but to no
+    # section of it.
+    header_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey("headers.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     doc_id: Mapped[uuid.UUID] = mapped_column(

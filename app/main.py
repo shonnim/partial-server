@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.routers import dashboard, documents, headers, parsed_docs, parsing
+from app.routers import dashboard, documents, headers, parsed_docs, parsing, sections
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -16,6 +16,7 @@ app.include_router(documents.router)
 app.include_router(headers.router)
 app.include_router(parsed_docs.router)
 app.include_router(parsing.router)
+app.include_router(sections.router)
 
 
 @app.get("/health")

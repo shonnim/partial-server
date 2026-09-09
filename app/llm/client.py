@@ -31,13 +31,16 @@ def chat_json(
     schema_name: str,
     max_tokens: int = 8000,
     temperature: float = 0.0,
+    timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
     """One chat completion whose content is JSON matching ``schema``.
 
-    Returns the decoded object. Raises LLMError for anything else.
+    ``timeout_seconds`` overrides the configured ceiling for a call known to
+    run long. Returns the decoded object. Raises LLMError for anything else.
     """
     settings = get_settings()
     url = f"{settings.llm_base_url.rstrip('/')}/chat/completions"
+    timeout = timeout_seconds if timeout_seconds is not None else settings.llm_timeout_seconds
 
     payload = {
         "model": settings.llm_model,
@@ -58,12 +61,10 @@ def chat_json(
             url,
             headers={"Authorization": f"Bearer {settings.llm_api_key}"},
             json=payload,
-            timeout=settings.llm_timeout_seconds,
+            timeout=timeout,
         )
     except httpx.TimeoutException as exc:
-        raise LLMError(
-            f"the model did not answer within {settings.llm_timeout_seconds:.0f}s"
-        ) from exc
+        raise LLMError(f"the model did not answer within {timeout:.0f}s") from exc
     except httpx.HTTPError as exc:
         raise LLMError(f"could not reach the model: {exc}") from exc
 

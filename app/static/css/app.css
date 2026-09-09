@@ -459,6 +459,12 @@ table.docs tbody tr:hover { background: var(--accent-tint); }
   background: color-mix(in srgb, var(--tint-outline) 11%, #fff);
   color: var(--tint-outline);
 }
+/* Stored content blocks: the Section page's count on a row. */
+.pill.contents {
+  background: color-mix(in srgb, var(--tint-md) 12%, #fff);
+  color: var(--tint-md);
+}
+.content-count:empty { display: none; }
 
 /* ---------- viewer ---------- */
 
@@ -1191,8 +1197,9 @@ dialog.modal-manual { width: min(820px, 94vw); height: min(700px, 88vh); }
 
 /* Parse docs: filled like the one action a dialog performs, and visibly busy
    for as long as the queue it started is live. */
-.btn-parse { --btn-tint: var(--accent); }
-.btn-primary.btn-parse.is-loading[disabled] {
+.btn-parse, .btn-section { --btn-tint: var(--accent); }
+.btn-primary.btn-parse.is-loading[disabled],
+.btn-primary.btn-section.is-loading[disabled] {
   background: color-mix(in srgb, var(--accent) 62%, #fff);
   color: #fff;
   box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 22%, transparent);

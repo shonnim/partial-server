@@ -21,6 +21,7 @@ NAV_ITEMS = (
     {"key": "documents", "label": "Documents", "icon": "📄", "url": "/documents"},
     {"key": "parsing", "label": "Parsing", "icon": "⚙️", "url": "/parsing"},
     {"key": "headers", "label": "Headers", "icon": "🗂️", "url": "/headers"},
+    {"key": "sections", "label": "Section", "icon": "📑", "url": "/sections"},
 )
 
 

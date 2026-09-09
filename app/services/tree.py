@@ -68,6 +68,9 @@ class FileNode:
     # document still needs to go through the VLM engine.
     parse_backend: str | None = None
     parse_status: DocumentStatus | None = None
+    # How many content blocks have been stored under this document's headers.
+    # The Section page disables the row once there are any.
+    content_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -171,6 +174,10 @@ def folder_files(
                    EXISTS (
                        SELECT 1 FROM parsed_docs p WHERE p.doc_id = documents.id
                    ) AS parsed,
+                   (
+                       SELECT count(*) FROM header_contents hc
+                       WHERE hc.doc_id = documents.id
+                   ) AS content_count,
                    latest.backend AS parse_backend,
                    latest.status AS parse_status
             FROM documents
@@ -200,6 +207,7 @@ def folder_files(
             parsed=r.parsed,
             parse_backend=r.parse_backend,
             parse_status=DocumentStatus(r.parse_status) if r.parse_status else None,
+            content_count=r.content_count,
         )
         for r in rows
     ]

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Section · partial-server{% endblock %}
+{% block heading %}📑 Section{% endblock %}
+{% block subheading %}Pick documents, then file each one's parsed blocks under its headers.{% endblock %}
+
+{% block actions %}
+  <span id="tree-selection" class="toolbar-count">Nothing selected</span>
+{% endblock %}
+
+{% block content %}
+  <div class="card toolbar">
+    {#- Disabled and spinning for as long as the queue it starts is live;
+        sections.js owns that state. -#}
+    <button type="button" class="btn btn-primary btn-section" id="btn-section"
+            data-label="📑 Section"
+            hx-post="{{ url_for('sections_run') }}"
+            hx-vals="js:{selection: window.treeSelectionJSON()}"
+            hx-target="#section-result"
+            hx-swap="innerHTML"
+            hx-indicator="#section-spinner">
+      📑 Section
+    </button>
+    <span class="spinner" id="section-spinner"></span>
+    <span class="toolbar-spacer"></span>
+    <span class="toolbar-count">
+      One document at a time · tables go through the model · already sectioned are skipped ·
+      at most <strong>{{ max_batch }}</strong> per click
+    </span>
+  </div>
+
+  <div id="section-result"></div>
+
+  <div class="card tree-card">
+    <div class="tree-head">
+      <span class="tree-head-label">📚 Corpus</span>
+      <span class="tree-badges" id="tree-root-badges" data-total="{{ total }}">
+        {% if failed %}<span class="pill fail">✗ {{ "{:,}".format(failed) }}</span>{% endif %}
+        <span class="pill total">{{ "{:,}".format(total) }}</span>
+        <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
+      </span>
+    </div>
+
+    <ul class="tree tree-children" id="tree-root">
+      {% include "sections/_partials/level.html" %}
+    </ul>
+  </div>
+
+  {#- The viewer pop-up, same as on the documents list. -#}
+  <div id="modal"></div>
+
+  <script src="{{ static_url('js/viewer-modal.js') }}" defer></script>
+  <script src="{{ static_url('js/tree.js') }}" defer></script>
+  <script src="{{ static_url('js/sections.js') }}" defer></script>
+{% endblock %}
