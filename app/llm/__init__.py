@@ -1,3 +1,3 @@
-from app.llm.client import LLMError, chat_json
+from app.llm.client import LLMError, chat_json, chat_vision
 
-__all__ = ["LLMError", "chat_json"]
+__all__ = ["LLMError", "chat_json", "chat_vision"]

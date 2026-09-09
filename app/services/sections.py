@@ -28,13 +28,16 @@ What is stored, by block type:
   no structure.
 * ``chart`` — the parser's reading of the chart plus its footnotes as text,
   its caption in ``caption``.
-* ``image`` — not stored yet; the image handling is still to be decided.
+* ``image`` — the crop is read from storage and described in Korean by the
+  vision model (see ``image_description``); the description is the text,
+  the caption in ``caption``.
 * anything else with a text — stored under its own type.
 
 A document is written all at once or not at all. Every table is reconstructed
-first, and only then are the previous rows replaced; a table that cannot be
-normalised within its retry budget fails the whole document with the reason,
-and the rows it had before are left as they were.
+and every image described first, and only then are the previous rows
+replaced; a table that cannot be normalised within its retry budget, or an
+image that cannot be described, fails the whole document with the reason, and
+the rows it had before are left as they were.
 """
 
 import time
@@ -51,6 +54,7 @@ from app.models.document import Document
 from app.models.header import Header, HeaderContent
 from app.services.header_extraction import _title_key, header_count, locate_heading
 from app.services.headers import contents_page_index, load_content_list
+from app.services.image_description import ImageDescriptionError, describe_image_block
 from app.services.table_normalizer import (
     TableNormalizationError,
     join_fragments,
@@ -58,16 +62,17 @@ from app.services.table_normalizer import (
 )
 
 # How many documents one click may queue. A document with a few dozen tables
-# is minutes of model time, so a selection is capped rather than left to grow
-# into an all-night job.
+# and figures is minutes of model time, so a selection is capped rather than
+# left to grow into an all-night job.
 MAX_SECTION_BATCH = 50
 
 # Block types that frame a page rather than carry its content.
 SKIPPED_TYPES = frozenset({"header", "footer", "aside_text", "page_number"})
 
 # Block types whose handling has not been decided yet. Left out, and counted,
-# rather than stored in a shape that would have to be redone.
-DEFERRED_TYPES = frozenset({"image"})
+# rather than stored in a shape that would have to be redone. Empty for now;
+# kept so the next undecided type has a place to go.
+DEFERRED_TYPES: frozenset[str] = frozenset()
 
 # What goes between the items of a list block when they are stored as one
 # text. Space, newline, space: each item on its own line, the bullets kept.
@@ -123,6 +128,8 @@ class SectionResult:
     #: Tables the parser gave no body for, stored with caption and notes only.
     tables_without_body: int = 0
     charts: int = 0
+    #: Images described by the vision model.
+    images: int = 0
     #: Blocks left out, by the reason: furniture, deferred, empty.
     skipped: dict[str, int] = field(default_factory=dict)
     seconds: float | None = None
@@ -305,14 +312,18 @@ class _Tally:
     table_attempts: int = 0
     tables_without_body: int = 0
     charts: int = 0
+    images: int = 0
     llm_seconds: float = 0.0
 
 
-def _row_for(block: Any, tally: _Tally) -> HeaderContent | None:
+def _row_for(
+    db: Session, document: Document, block: Any, tally: _Tally
+) -> HeaderContent | None:
     """The row a block becomes, or None when it is not stored.
 
     Raises TableNormalizationError for a table the model could not
-    reconstruct — the caller decides what that means for the document.
+    reconstruct, and ImageDescriptionError for an image the vision model
+    could not describe — the caller decides what that means for the document.
     """
     if not isinstance(block, dict):
         tally.skipped["not a block"] += 1
@@ -370,6 +381,15 @@ def _row_for(block: Any, tally: _Tally) -> HeaderContent | None:
         tally.charts += 1
         return row
 
+    if kind == "image":
+        began = time.monotonic()
+        described = describe_image_block(db, document, block)
+        tally.llm_seconds += time.monotonic() - began
+        tally.images += 1
+        row.text = described.text
+        row.caption = described.caption
+        return row
+
     # text, page_footnote, and any other block that carries a text.
     row.text = _text_of(block)
     if row.text is None:
@@ -415,12 +435,14 @@ def run_sections(db: Session, document: Document) -> SectionResult:
     tally = _Tally()
     rows: list[HeaderContent] = []
     for index, block in enumerate(blocks):
+        page = _page_of(block)
+        where = f"page_idx {page}" if page is not None else f"block {index}"
         try:
-            row = _row_for(block, tally)
+            row = _row_for(db, document, block, tally)
         except TableNormalizationError as exc:
-            page = _page_of(block)
-            where = f"page_idx {page}" if page is not None else f"block {index}"
             return failed(f"table at {where} could not be reconstructed: {exc}")
+        except ImageDescriptionError as exc:
+            return failed(f"image at {where} could not be described: {exc}")
         if row is None:
             continue
         row.doc_id = document.id
@@ -442,6 +464,7 @@ def run_sections(db: Session, document: Document) -> SectionResult:
         table_attempts=tally.table_attempts,
         tables_without_body=tally.tables_without_body,
         charts=tally.charts,
+        images=tally.images,
         skipped=dict(tally.skipped),
         seconds=time.monotonic() - began,
         llm_seconds=tally.llm_seconds,

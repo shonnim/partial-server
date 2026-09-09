@@ -131,7 +131,7 @@
       row.classList.add("is-running");
       row.querySelector(".gate-status").innerHTML =
         '<span class="pill total is-live">⏱ <span data-row-timer>0:00</span></span>';
-      state.textContent = "⚙ filing blocks · tables through the model";
+      state.textContent = "⚙ filing blocks · tables and images through the models";
       tick();
 
       try {

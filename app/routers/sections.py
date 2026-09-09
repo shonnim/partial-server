@@ -91,9 +91,10 @@ def sections_run_one(
 ) -> HTMLResponse:
     """File one document's blocks under its headers and report it as a row.
 
-    One document per request, by design: every table in it is a model call,
-    so a document with many tables is minutes, and the browser driving the
-    queue is what keeps a batch from being one long HTTP request.
+    One document per request, by design: every table and every image in it
+    is a model call, so a document with many of them is minutes, and the
+    browser driving the queue is what keeps a batch from being one long HTTP
+    request.
     """
     doc = _document_or_404(db, document_id)
 

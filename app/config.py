@@ -31,6 +31,16 @@ class Settings(BaseSettings):
         default=900.0, alias="LLM_TABLE_TIMEOUT_SECONDS"
     )
 
+    # The vision model the Section run describes figures with. A separate
+    # server from the text model, so its own base URL and model name; the key
+    # falls back to the text model's when none is given.
+    vlm_base_url: str = Field(
+        default="https://gpu-api03.ihopper.co.kr/v1", alias="VLM_BASE_URL"
+    )
+    vlm_api_key: str = Field(default="", alias="VLM_API_KEY")
+    vlm_model: str = Field(default="qwen2.5-vl-7b-instruct", alias="VLM_MODEL")
+    vlm_timeout_seconds: float = Field(default=180.0, alias="VLM_TIMEOUT_SECONDS")
+
     # The document parsing service the Pages method sends a contents page to.
     # One VLM pass over a few pages is slow, so the timeout is generous.
     doc_extract_base_url: str = Field(

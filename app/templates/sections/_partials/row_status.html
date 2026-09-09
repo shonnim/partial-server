@@ -3,9 +3,9 @@
 
   A success says how many rows landed and how many of them sit before the
   first header, how many tables the model reconstructed (and in how many
-  calls — a table that needed a retry is worth a look), and how long the
-  whole thing took against how long the model took. Skips are listed by
-  reason in the tooltip.
+  calls — a table that needed a retry is worth a look), how many images the
+  vision model described, and how long the whole thing took against how long
+  the models took. Skips are listed by reason in the tooltip.
 
   data-content-count is what sections.js reads to bring the tree row up to
   date without a reload.
@@ -27,6 +27,9 @@
   {% endif %}
   {% if result.charts %}
     <span class="pill total">{{ result.charts }} chart{{ '' if result.charts == 1 else 's' }}</span>
+  {% endif %}
+  {% if result.images %}
+    <span class="pill total" title="images described by the vision model">{{ result.images }} image{{ '' if result.images == 1 else 's' }}</span>
   {% endif %}
   {% if result.skipped_total %}
     <span class="pill total" title="{% for reason, n in result.skipped.items() %}{{ reason }}: {{ n }}{{ ' · ' if not loop.last }}{% endfor %}">↷ {{ result.skipped_total }} skipped</span>
