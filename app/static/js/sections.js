@@ -258,7 +258,7 @@
     let blocks = 0;
     let modelSeconds = 0;
     const paint = () => {
-      state.textContent = `⚙ ${done} / ${rows.length} · filing blocks · tables and images through the models`;
+      state.textContent = `⚙ ${done} / ${rows.length} · filing blocks · images through the model`;
       log.stats({ done, total: rows.length, blocks, modelSeconds, failed });
     };
 

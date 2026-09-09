@@ -2,10 +2,9 @@
   The status cell of one queue row after a Section run on it.
 
   A success says how many rows landed and how many of them sit before the
-  first header, how many tables the model reconstructed (and in how many
-  calls — a table that needed a retry is worth a look), how many images the
-  vision model described, and how long the whole thing took against how long
-  the models took. Skips are listed by reason in the tooltip.
+  first header, how many tables were converted from their HTML, how many
+  images the vision model described, and how long the whole thing took
+  against how long the model took. Skips are listed by reason in the tooltip.
 
   data-content-count is what sections.js reads to bring the tree row up to
   date without a reload. data-summary, data-seconds and data-llm-seconds are
@@ -13,7 +12,7 @@
 #}
 {% if result.ok %}
   {%- set parts = [] -%}
-  {%- if result.tables %}{% set _ = parts.append(result.tables ~ ' table' ~ ('' if result.tables == 1 else 's') ~ ' (' ~ result.table_attempts ~ ' call' ~ ('' if result.table_attempts == 1 else 's') ~ ')') %}{% endif -%}
+  {%- if result.tables %}{% set _ = parts.append(result.tables ~ ' table' ~ ('' if result.tables == 1 else 's')) %}{% endif -%}
   {%- if result.tables_without_body %}{% set _ = parts.append(result.tables_without_body ~ ' without body') %}{% endif -%}
   {%- if result.images %}{% set _ = parts.append(result.images ~ ' image' ~ ('' if result.images == 1 else 's')) %}{% endif -%}
   {%- if result.charts %}{% set _ = parts.append(result.charts ~ ' chart' ~ ('' if result.charts == 1 else 's')) %}{% endif -%}
@@ -29,9 +28,7 @@
     <span class="pill total" title="blocks before the first header, stored with no header">{{ result.unassigned }} before first header</span>
   {% endif %}
   {% if result.tables %}
-    <span class="pill total" title="tables reconstructed · model calls it took">
-      {{ result.tables }} table{{ '' if result.tables == 1 else 's' }} · {{ result.table_attempts }} call{{ '' if result.table_attempts == 1 else 's' }}
-    </span>
+    <span class="pill total" title="tables converted from their HTML">{{ result.tables }} table{{ '' if result.tables == 1 else 's' }}</span>
   {% endif %}
   {% if result.tables_without_body %}
     <span class="pill fail" title="tables the parser gave no body for: caption and notes stored, no structure">{{ result.tables_without_body }} table{{ '' if result.tables_without_body == 1 else 's' }} without body</span>

@@ -21,11 +21,11 @@ What is stored, by block type:
   never stored.
 * ``text``, ``page_footnote`` — stored when the text is not empty.
 * ``list`` — the items joined as one text.
-* ``table`` — reconstructed by the model into structured JSON, validated,
-  rendered to Markdown (see ``table_normalizer``); the Markdown is the text,
-  the JSON goes in ``structured_json_table``, the caption in ``caption``. A
-  table the parser gave no body for keeps its caption and footnotes and has
-  no structure.
+* ``table`` — the HTML body is turned into Markdown deterministically (see
+  ``html_table``): spans expanded, the header flattened, the caption above
+  and the footnotes below; the Markdown is the text, the caption in
+  ``caption``. No model is involved. A table the parser gave no body for
+  keeps its caption and footnotes only.
 * ``chart`` — the parser's reading of the chart plus its footnotes as text,
   its caption in ``caption``.
 * ``image`` — the crop is read from storage and described in Korean by the
@@ -33,13 +33,14 @@ What is stored, by block type:
   the caption in ``caption``.
 * anything else with a text — stored under its own type.
 
-A document is written all at once or not at all. Every table is reconstructed
+A document is written all at once or not at all. Every table is converted
 and every image described first, and only then are the previous rows
-replaced; a table that cannot be normalised within its retry budget, or an
-image that cannot be described, fails the whole document with the reason, and
-the rows it had before are left as they were.
+replaced; a table whose HTML cannot be read safely, or an image that cannot
+be described, fails the whole document with the reason, and the rows it had
+before are left as they were.
 """
 
+import logging
 import time
 import uuid
 from collections import Counter
@@ -54,16 +55,15 @@ from app.models.document import Document
 from app.models.header import Header, HeaderContent
 from app.services.header_extraction import _title_key, header_count, locate_heading
 from app.services.headers import contents_page_index, load_content_list
+from app.services.html_table import TableParseError, convert_html_table
 from app.services.image_description import ImageDescriptionError, describe_image_block
-from app.services.table_normalizer import (
-    TableNormalizationError,
-    join_fragments,
-    normalize_table,
-)
+from app.services.table_normalizer import join_fragments
 
-# How many documents one click may queue. A document with a few dozen tables
-# and figures is minutes of model time, so a selection is capped rather than
-# left to grow into an all-night job.
+logger = logging.getLogger(__name__)
+
+# How many documents one click may queue. A document with a few dozen figures
+# is minutes of model time, so a selection is capped rather than left to grow
+# into an all-night job.
 MAX_SECTION_BATCH = 50
 
 # Block types that frame a page rather than carry its content.
@@ -122,9 +122,8 @@ class SectionResult:
     saved: int | None = None
     #: Of those, rows stored with no header: blocks before the first heading.
     unassigned: int = 0
-    #: Tables reconstructed by the model, and how many model calls they took.
+    #: Tables converted from their HTML.
     tables: int = 0
-    table_attempts: int = 0
     #: Tables the parser gave no body for, stored with caption and notes only.
     tables_without_body: int = 0
     charts: int = 0
@@ -309,7 +308,6 @@ class _Tally:
 
     skipped: Counter = field(default_factory=Counter)
     tables: int = 0
-    table_attempts: int = 0
     tables_without_body: int = 0
     charts: int = 0
     images: int = 0
@@ -321,9 +319,9 @@ def _row_for(
 ) -> HeaderContent | None:
     """The row a block becomes, or None when it is not stored.
 
-    Raises TableNormalizationError for a table the model could not
-    reconstruct, and ImageDescriptionError for an image the vision model
-    could not describe — the caller decides what that means for the document.
+    Raises TableParseError for a table whose HTML cannot be read safely, and
+    ImageDescriptionError for an image the vision model could not describe —
+    the caller decides what that means for the document.
     """
     if not isinstance(block, dict):
         tally.skipped["not a block"] += 1
@@ -361,18 +359,16 @@ def _row_for(
         row.caption = join_fragments(block.get("table_caption"))
         body = block.get("table_body")
         if not isinstance(body, str) or not body.strip():
-            # No body to reconstruct: the caption and the notes are what the
+            # No body to convert: the caption and the notes are what the
             # parser gave, and they are kept as they are.
             row.text = join_fragments(block.get("table_footnote"))
             tally.tables_without_body += 1
             return row
-        began = time.monotonic()
-        normalized = normalize_table(block)
-        tally.llm_seconds += time.monotonic() - began
+        converted = convert_html_table(
+            body, block.get("table_caption"), block.get("table_footnote")
+        )
         tally.tables += 1
-        tally.table_attempts += normalized.attempts
-        row.text = normalized.markdown
-        row.structured_json_table = normalized.structured
+        row.text = converted.markdown
         return row
 
     if kind == "chart":
@@ -439,8 +435,16 @@ def run_sections(db: Session, document: Document) -> SectionResult:
         where = f"page_idx {page}" if page is not None else f"block {index}"
         try:
             row = _row_for(db, document, block, tally)
-        except TableNormalizationError as exc:
-            return failed(f"table at {where} could not be reconstructed: {exc}")
+        except TableParseError as exc:
+            # The table's HTML stays as it is in the content list; nothing
+            # is written for this document until someone has looked.
+            logger.warning(
+                "document %s: table at %s could not be converted: %s",
+                document.id,
+                where,
+                exc,
+            )
+            return failed(f"table at {where} could not be converted: {exc}")
         except ImageDescriptionError as exc:
             return failed(f"image at {where} could not be described: {exc}")
         if row is None:
@@ -461,7 +465,6 @@ def run_sections(db: Session, document: Document) -> SectionResult:
         saved=len(rows),
         unassigned=sum(1 for r in rows if r.header_id is None),
         tables=tally.tables,
-        table_attempts=tally.table_attempts,
         tables_without_body=tally.tables_without_body,
         charts=tally.charts,
         images=tally.images,
