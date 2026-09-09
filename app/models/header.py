@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -73,6 +73,8 @@ class HeaderContent(Base):
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Caption attached to a table, image, or chart block; NULL for plain text.
     caption: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Table block parsed into a structured (rows/cells) form; NULL for non-table blocks.
+    structured_json_table: Mapped[dict | list | None] = mapped_column(JSONB, nullable=True)
     # "order" is a reserved word in SQL; SQLAlchemy quotes it on emit.
     order: Mapped[int | None] = mapped_column("order", Integer, nullable=True)
     bbox_0: Mapped[int | None] = mapped_column(Integer, nullable=True)
