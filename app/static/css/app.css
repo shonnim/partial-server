@@ -1211,3 +1211,62 @@ dialog.modal-manual { width: min(820px, 94vw); height: min(700px, 88vh); }
   border-radius: 50%;
   animation: spin .7s linear infinite;
 }
+
+/* ---------- section run log ---------- */
+
+/* The box on the right of the Section page. Counters on top, then one line
+   per event with the run clock in a fixed column, so a document's line can
+   be matched to when it started. The list scrolls inside the box; the box
+   itself stays put with the side panel. */
+.section-log-stats { margin-top: 0; }
+.section-log-actions { margin: 12px 0 8px; }
+.run-log {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 56vh;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.run-log-empty {
+  padding: 12px;
+  color: var(--ink-faint);
+  font-family: inherit;
+  font-size: 12.5px;
+}
+.run-log-line {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  column-gap: 8px;
+  padding: 5px 10px;
+  border-top: 1px solid var(--line);
+}
+.run-log-line:first-child { border-top: 0; }
+.run-log-time {
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.run-log-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+.run-log-detail {
+  grid-column: 2;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+.run-log-line.is-doc .run-log-text { color: var(--accent); }
+.run-log-line.is-ok .run-log-text { color: var(--ok); font-weight: 650; }
+.run-log-line.is-fail .run-log-text { color: var(--fail); font-weight: 650; }
+.run-log-line.is-fail .run-log-detail { color: var(--fail); }
+.run-log-line.is-stop .run-log-text { color: var(--ink-soft); font-style: italic; }
+.run-log-line.is-info .run-log-text { font-weight: 650; }
+.run-log-rule { height: 0; margin: 4px 0; border-top: 2px dashed var(--line); }
+.run-log::-webkit-scrollbar { width: 8px; }
+.run-log::-webkit-scrollbar-thumb { background: #cfd4e6; border-radius: 4px; }

@@ -9,41 +9,79 @@
 {% endblock %}
 
 {% block content %}
-  <div class="card toolbar">
-    {#- Disabled and spinning for as long as the queue it starts is live;
-        sections.js owns that state. -#}
-    <button type="button" class="btn btn-primary btn-section" id="btn-section"
-            data-label="📑 Section"
-            hx-post="{{ url_for('sections_run') }}"
-            hx-vals="js:{selection: window.treeSelectionJSON()}"
-            hx-target="#section-result"
-            hx-swap="innerHTML"
-            hx-indicator="#section-spinner">
-      📑 Section
-    </button>
-    <span class="spinner" id="section-spinner"></span>
-    <span class="toolbar-spacer"></span>
-    <span class="toolbar-count">
-      One document at a time · tables go through the model · already sectioned are skipped ·
-      at most <strong>{{ max_batch }}</strong> per click
-    </span>
-  </div>
+  {#- The same two-column frame as Parsing: the tree and the queue on the
+      left, a box that keeps its place on the right. Here the box is the run
+      log — every document the queue touched, with what it took. -#}
+  <div class="parsing-layout">
+    <div class="parsing-main">
+      <div class="card toolbar">
+        {#- Disabled and spinning for as long as the queue it starts is live;
+            sections.js owns that state. -#}
+        <button type="button" class="btn btn-primary btn-section" id="btn-section"
+                data-label="📑 Section"
+                hx-post="{{ url_for('sections_run') }}"
+                hx-vals="js:{selection: window.treeSelectionJSON()}"
+                hx-target="#section-result"
+                hx-swap="innerHTML"
+                hx-indicator="#section-spinner">
+          📑 Section
+        </button>
+        <span class="spinner" id="section-spinner"></span>
+        <span class="toolbar-spacer"></span>
+        <span class="toolbar-count">
+          One document at a time · tables and images go through the models · already sectioned are skipped ·
+          at most <strong>{{ max_batch }}</strong> per click
+        </span>
+      </div>
 
-  <div id="section-result"></div>
+      <div id="section-result"></div>
 
-  <div class="card tree-card">
-    <div class="tree-head">
-      <span class="tree-head-label">📚 Corpus</span>
-      <span class="tree-badges" id="tree-root-badges" data-total="{{ total }}">
-        {% if failed %}<span class="pill fail">✗ {{ "{:,}".format(failed) }}</span>{% endif %}
-        <span class="pill total">{{ "{:,}".format(total) }}</span>
-        <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
-      </span>
+      <div class="card tree-card">
+        <div class="tree-head">
+          <span class="tree-head-label">📚 Corpus</span>
+          <span class="tree-badges" id="tree-root-badges" data-total="{{ total }}">
+            {% if failed %}<span class="pill fail">✗ {{ "{:,}".format(failed) }}</span>{% endif %}
+            <span class="pill total">{{ "{:,}".format(total) }}</span>
+            <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
+          </span>
+        </div>
+
+        <ul class="tree tree-children" id="tree-root">
+          {% include "sections/_partials/level.html" %}
+        </ul>
+      </div>
     </div>
 
-    <ul class="tree tree-children" id="tree-root">
-      {% include "sections/_partials/level.html" %}
-    </ul>
+    <aside class="side-panel">
+      {#- Filled in by sections.js as the queue runs: one line per event,
+          the counters above them. The log survives across runs on the page
+          — a second click appends after a divider — until Clear. -#}
+      <section class="card side-box" id="section-log-box">
+        <div class="side-box-head">
+          <span class="side-box-title">📜 Run log</span>
+          <span class="live-badge" id="section-log-live" hidden>
+            <span class="live-dot"></span> running
+          </span>
+        </div>
+
+        <dl class="stat-grid section-log-stats">
+          <div class="stat-cell" data-stat="elapsed"><dt>Elapsed</dt><dd>0:00</dd></div>
+          <div class="stat-cell" data-stat="progress"><dt>Documents</dt><dd>0 / 0</dd></div>
+          <div class="stat-cell" data-stat="blocks"><dt>Blocks stored</dt><dd>0</dd></div>
+          <div class="stat-cell" data-stat="model"><dt>Model time</dt><dd>0:00</dd></div>
+        </dl>
+
+        <div class="side-box-actions section-log-actions">
+          <span class="side-checked" id="section-log-summary">No run yet.</span>
+          <span class="toolbar-spacer"></span>
+          <button type="button" class="btn ghost" id="section-log-clear" disabled>Clear</button>
+        </div>
+
+        <ol class="run-log" id="section-log" aria-live="polite">
+          <li class="run-log-empty">Start a Section run and each document will be logged here.</li>
+        </ol>
+      </section>
+    </aside>
   </div>
 
   {#- The viewer pop-up, same as on the documents list. -#}

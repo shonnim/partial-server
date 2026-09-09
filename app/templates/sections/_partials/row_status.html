@@ -8,10 +8,21 @@
   the models took. Skips are listed by reason in the tooltip.
 
   data-content-count is what sections.js reads to bring the tree row up to
-  date without a reload.
+  date without a reload. data-summary, data-seconds and data-llm-seconds are
+  what it writes into the run log — the same facts as the pills, on one line.
 #}
 {% if result.ok %}
-  <span class="pill ok" data-doc-id="{{ result.id }}" data-content-count="{{ result.saved }}">
+  {%- set parts = [] -%}
+  {%- if result.tables %}{% set _ = parts.append(result.tables ~ ' table' ~ ('' if result.tables == 1 else 's') ~ ' (' ~ result.table_attempts ~ ' call' ~ ('' if result.table_attempts == 1 else 's') ~ ')') %}{% endif -%}
+  {%- if result.tables_without_body %}{% set _ = parts.append(result.tables_without_body ~ ' without body') %}{% endif -%}
+  {%- if result.images %}{% set _ = parts.append(result.images ~ ' image' ~ ('' if result.images == 1 else 's')) %}{% endif -%}
+  {%- if result.charts %}{% set _ = parts.append(result.charts ~ ' chart' ~ ('' if result.charts == 1 else 's')) %}{% endif -%}
+  {%- if result.unassigned %}{% set _ = parts.append(result.unassigned ~ ' before first header') %}{% endif -%}
+  {%- if result.skipped_total %}{% set _ = parts.append(result.skipped_total ~ ' skipped') %}{% endif -%}
+  <span class="pill ok" data-doc-id="{{ result.id }}" data-content-count="{{ result.saved }}"
+        data-summary="{{ parts|join(' · ') }}"
+        data-seconds="{{ '%.1f'|format(result.seconds or 0) }}"
+        data-llm-seconds="{{ '%.1f'|format(result.llm_seconds) }}">
     ✓ {{ result.saved }} block{{ '' if result.saved == 1 else 's' }}
   </span>
   {% if result.unassigned %}
@@ -38,7 +49,8 @@
     <span class="pill total" title="total · model">{{ '%.0f'|format(result.seconds) }}s · {{ '%.0f'|format(result.llm_seconds) }}s</span>
   {% endif %}
 {% else %}
-  <span class="pill fail">✗ failed</span>
+  <span class="pill fail" data-error="{{ result.error }}"
+        data-seconds="{{ '%.1f'|format(result.seconds or 0) }}">✗ failed</span>
   {% if result.seconds is not none %}
     <span class="pill total">{{ '%.0f'|format(result.seconds) }}s</span>
   {% endif %}
