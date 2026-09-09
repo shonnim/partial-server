@@ -1,8 +1,13 @@
 {#
-  The outcome of a "Section" click: the selection, with the documents the run
-  will not take set aside. What is left is a live work queue — sections.js
-  posts each row's data-run-url in turn and swaps the reply into its status
-  cell — while the strip above keeps time.
+  The outcome of a "Section" click: a slim strip — how many documents the run
+  takes, how many it leaves, what it is doing now, and Stop. Everything per
+  document goes to the run log on the right, not here.
+
+  The work queue itself is still rendered, hidden: sections.js posts each
+  row's data-run-url in turn and swaps the reply into its status cell, then
+  reads the reply's data attributes into the log. The rows are the data the
+  run walks, not something to look at. Skipped documents are listed the same
+  way, so the log can say which were left out and why.
 
   Errors come back as this card too: the caller is a button on the page, and
   a 4xx would leave the panel blank.
@@ -11,54 +16,31 @@
   <div class="card check-result is-error">{{ error }}</div>
 {% else %}
   <div class="card check-result" data-run="sections">
-    <div class="check-summary">
+    <div class="run-strip" data-run-strip>
       <span class="pill ok">✓ {{ queue.eligible|length }} to section</span>
       {% if queue.skipped %}
-        <span class="pill total">↷ {{ queue.skipped|length }} skipped</span>
+        <span class="pill total" title="already sectioned, or no headers stored — see the run log">↷ {{ queue.skipped|length }} skipped</span>
+      {% endif %}
+      {% if queue.eligible %}
+        <span class="pill total" data-run-state>⏳ starting</span>
+        <span class="toolbar-spacer"></span>
+        <button type="button" class="btn ghost" data-run-stop>■ Stop</button>
+      {% else %}
+        <span class="check-note">Nothing in this selection can be sectioned.</span>
       {% endif %}
     </div>
 
-    {% if queue.eligible %}
-      {#- The clock for the whole run. Filled in by sections.js every second:
-          elapsed as m:ss, how far down the queue it is, and the tally at the
-          end. Stop lets the current document finish and leaves the rest. -#}
-      <div class="run-strip" data-run-strip>
-        <span class="run-timer" data-run-timer>0:00</span>
-        <span class="pill total" data-run-state>⏳ starting</span>
-        <span class="run-progress" data-run-progress>0 / {{ queue.eligible|length }}</span>
-        <span class="run-tally" data-run-tally></span>
-        <span class="toolbar-spacer"></span>
-        <button type="button" class="btn ghost" data-run-stop>■ Stop</button>
-      </div>
-
-      <ul class="gate-queue">
-        {% for candidate in queue.eligible %}
-          <li class="gate-row" data-doc-id="{{ candidate.id }}"
-              data-run-url="{{ url_for('sections_run_one', document_id=candidate.id) }}">
-            <span class="gate-name" title="{{ candidate.filename }}">{{ candidate.filename }}</span>
-            <span class="gate-status">
-              <span class="pill total">queued</span>
-            </span>
-            <span class="gate-actions">
-              <span class="pill headers">{{ candidate.header_count }} header{{ '' if candidate.header_count == 1 else 's' }}</span>
-              <a class="btn btn-outline" data-viewer
-                 href="{{ url_for('header_outline', document_id=candidate.id) }}">Headers</a>
-              <a class="btn btn-pdf" data-viewer
-                 href="{{ url_for('document_viewer', document_id=candidate.id) }}">PDF</a>
-            </span>
-          </li>
-        {% endfor %}
-      </ul>
-    {% else %}
-      <p class="check-note">Nothing in this selection can be sectioned.</p>
-    {% endif %}
-
-    {% if queue.skipped %}
-      <ul class="check-failures">
-        {% for candidate in queue.skipped %}
-          <li><strong>{{ candidate.filename }}</strong> — {{ candidate.reason }}</li>
-        {% endfor %}
-      </ul>
-    {% endif %}
+    <ul class="gate-queue" hidden>
+      {% for candidate in queue.eligible %}
+        <li class="gate-row" data-doc-id="{{ candidate.id }}"
+            data-name="{{ candidate.filename }}"
+            data-run-url="{{ url_for('sections_run_one', document_id=candidate.id) }}">
+          <span class="gate-status"></span>
+        </li>
+      {% endfor %}
+      {% for candidate in queue.skipped %}
+        <li class="gate-skipped" data-name="{{ candidate.filename }}" data-reason="{{ candidate.reason }}"></li>
+      {% endfor %}
+    </ul>
   </div>
 {% endif %}
