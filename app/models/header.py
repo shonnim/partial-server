@@ -71,6 +71,8 @@ class HeaderContent(Base):
     page_idx: Mapped[int | None] = mapped_column(Integer, nullable=True)
     type: Mapped[str] = mapped_column(String(50), nullable=False)
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Caption attached to a table, image, or chart block; NULL for plain text.
+    caption: Mapped[str | None] = mapped_column(Text, nullable=True)
     # "order" is a reserved word in SQL; SQLAlchemy quotes it on emit.
     order: Mapped[int | None] = mapped_column("order", Integer, nullable=True)
     bbox_0: Mapped[int | None] = mapped_column(Integer, nullable=True)
