@@ -1,0 +1,63 @@
+{#
+  One page of a document's stored blocks, in the order the run filed them.
+
+  A heading line is emitted whenever the block's header changes, so the page
+  reads the way the run wrote it: the outline, with what landed under each
+  entry. The first block of a page always carries its heading, which is what
+  makes a page appended by "load more" readable on its own.
+
+  Every field of the row is shown as it is stored — a table's content is the
+  parser's HTML, not a rendered table. This pop-up answers "what is in the
+  database", so nothing is prettified on the way out.
+#}
+{% for block in page.blocks %}
+  {%- set row = block.row -%}
+  {%- set previous = page.blocks[loop.index0 - 1].row if not loop.first else None -%}
+  {% if loop.first or row.header_id != previous.header_id %}
+    <li class="contents-head">
+      {% if block.header %}
+        <span class="contents-head-title" title="{{ block.header }}">{{ block.header }}</span>
+      {% else %}
+        <span class="contents-head-title is-none" title="stored with no header — the cover, the contents page">Before the first header</span>
+      {% endif %}
+    </li>
+  {% endif %}
+
+  <li class="contents-block">
+    <div class="contents-meta">
+      <span class="contents-order">#{{ row.order if row.order is not none else '—' }}</span>
+      <span class="pill kind kind-{{ row.type }}">{{ row.type }}</span>
+      {% if row.page_idx is not none %}
+        <span class="pill total" title="content list page_idx">idx {{ row.page_idx }}</span>
+      {% endif %}
+      {% if row.bbox_0 is not none %}
+        <span class="contents-bbox" title="bbox on the page">{{ row.bbox_0 }}, {{ row.bbox_1 }} → {{ row.bbox_2 }}, {{ row.bbox_3 }}</span>
+      {% endif %}
+    </div>
+
+    {% if row.caption %}
+      <p class="contents-field is-caption"><span class="contents-label">caption</span>{{ row.caption }}</p>
+    {% endif %}
+
+    {% if row.content %}
+      <pre class="contents-field is-content">{{ row.content }}</pre>
+    {% else %}
+      <p class="contents-field is-empty">no content stored</p>
+    {% endif %}
+
+    {% if row.footnote %}
+      <p class="contents-field is-footnote"><span class="contents-label">footnote</span>{{ row.footnote }}</p>
+    {% endif %}
+  </li>
+{% endfor %}
+
+{% if page.next_offset is not none %}
+  <li class="contents-more">
+    <button type="button" class="btn"
+            hx-get="{{ url_for('sections_contents', document_id=doc.id) }}?offset={{ page.next_offset }}"
+            hx-target="closest .contents-more"
+            hx-swap="outerHTML">
+      ↓ Load {{ page.remaining }} more
+    </button>
+  </li>
+{% endif %}

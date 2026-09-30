@@ -9,9 +9,10 @@
 {% endblock %}
 
 {% block content %}
-  {#- The same two-column frame as Parsing: the tree and the queue on the
-      left, a box that keeps its place on the right. Here the box is the run
-      log — every document the queue touched, with what it took. -#}
+  {#- The same two-column frame as Parsing: the tree on the left, a box
+      that keeps its place on the right. Here that box is the run log, and
+      the queue a click starts sits under it — the button starts a run, the
+      right-hand column is where one is watched. -#}
   <div class="parsing-layout">
     <div class="parsing-main">
       <div class="card toolbar">
@@ -33,8 +34,6 @@
           at most <strong>{{ max_batch }}</strong> per click
         </span>
       </div>
-
-      <div id="section-result"></div>
 
       <div class="card tree-card">
         <div class="tree-head">
@@ -81,6 +80,10 @@
           <li class="run-log-empty">Start a Section run and each document will be logged here.</li>
         </ol>
       </section>
+
+      {#- Where the Section button's reply lands: the queue strip, and the
+          hidden rows sections.js walks. Empty until the first click. -#}
+      <div id="section-result"></div>
     </aside>
   </div>
 

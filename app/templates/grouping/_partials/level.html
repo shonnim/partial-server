@@ -1,0 +1,43 @@
+{#
+  One level of the grouping tree: subfolders first, then the documents sitting
+  directly in this folder. Rendered into the parent's <ul class="tree-children">,
+  so it emits list items only.
+
+  Every box is selectable here — a document can always be regrouped — so
+  nothing opts out. The folder badges show how many documents beneath it
+  already carry a group id, which is how a half-labelled folder stands out.
+#}
+{% for folder in level.folders %}
+  <li class="tree-node" data-path="{{ folder.path }}" data-total="{{ folder.total }}">
+    <div class="tree-row">
+      <input type="checkbox" class="tree-check" data-kind="folder"
+             aria-label="Select folder {{ folder.name }}">
+      <button type="button" class="tree-label" aria-expanded="false"
+              hx-get="{{ url_for('grouping_nodes') }}?path={{ folder.path|urlencode }}"
+              hx-target="next .tree-children"
+              hx-swap="innerHTML"
+              hx-trigger="click once">
+        <span class="tree-icon">
+          <span class="icon-closed">📁</span><span class="icon-open">📂</span>
+        </span>
+        <span class="tree-name" title="{{ folder.path }}">{{ folder.name }}</span>
+      </button>
+      <span class="tree-badges">
+        {% if folder.with_group %}
+          <span class="pill group" title="{{ folder.with_group }} of {{ folder.total }} grouped">🏷 {{ folder.with_group }}</span>
+        {% endif %}
+        {% if folder.failed %}<span class="pill fail">✗ {{ folder.failed }}</span>{% endif %}
+        <span class="pill total">{{ folder.total }}</span>
+        {#- Filled in by tree.js as boxes are ticked; hidden while nothing is. -#}
+        <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
+      </span>
+    </div>
+    <ul class="tree-children" hidden></ul>
+  </li>
+{% endfor %}
+
+{% include "grouping/_partials/files.html" %}
+
+{% if level.is_empty %}
+  <li class="tree-empty">Empty folder</li>
+{% endif %}

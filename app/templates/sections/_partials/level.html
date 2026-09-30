@@ -7,8 +7,12 @@
 {% for folder in level.folders %}
   <li class="tree-node" data-path="{{ folder.path }}" data-total="{{ folder.total }}">
     <div class="tree-row">
+      {#- A folder whose documents are all sectioned already has nothing a
+          tick could take, so its box starts disabled, before it is opened. -#}
       <input type="checkbox" class="tree-check" data-kind="folder"
-             aria-label="Select folder {{ folder.name }}">
+             aria-label="Select folder {{ folder.name }}"
+             {% if folder.all_sectioned %}disabled
+             title="Blocks already stored for all {{ folder.total }} document{{ '' if folder.total == 1 else 's' }}"{% endif %}>
       <button type="button" class="tree-label" aria-expanded="false"
               hx-get="{{ url_for('sections_nodes') }}?path={{ folder.path|urlencode }}"
               hx-target="next .tree-children"

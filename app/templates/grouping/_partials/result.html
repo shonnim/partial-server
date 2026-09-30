@@ -1,0 +1,27 @@
+{#
+  The outcome of a Save or Clear click. The data attributes are what
+  grouping.js reads to repaint the group pills on the rows it can see and to
+  drop the selection afterwards.
+
+  Errors come back as this card too: the caller is a button on the page, and
+  a 4xx would leave the panel blank.
+#}
+{% if error %}
+  <div class="card check-result is-error">{{ error }}</div>
+{% else %}
+  <div class="card check-result" data-group-saved
+       data-group-id="{{ result.group_id or '' }}"
+       data-doc-ids="{{ result.doc_ids|join(',') }}">
+    <div class="check-summary">
+      {% if result.cleared %}
+        <span class="pill ok">✓ group cleared on {{ result.count }} document{{ '' if result.count == 1 else 's' }}</span>
+      {% else %}
+        <span class="pill ok">✓ {{ result.count }} document{{ '' if result.count == 1 else 's' }}</span>
+        <span class="pill group">🏷 {{ result.group_id }}</span>
+      {% endif %}
+    </div>
+    {% if result.count == 0 %}
+      <p class="check-note">Nothing matched the selection any more. Reload the page.</p>
+    {% endif %}
+  </div>
+{% endif %}

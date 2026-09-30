@@ -1,0 +1,28 @@
+{#
+  What the Section run stored for one document: the header_contents rows,
+  opened from the "N blocks" count on the tree row.
+
+  The first page arrives inside this dialog; "load more" fetches the rest as
+  rows alone and appends them to the same list.
+#}
+<dialog class="modal modal-narrow" aria-label="Stored blocks" data-doc-id="{{ doc.id }}">
+  <header class="modal-head">
+    <strong class="modal-title" title="{{ doc.filename }}">{{ doc.filename }}</strong>
+    <span class="modal-actions">
+      <span class="pill contents">{{ page.total }} block{{ '' if page.total == 1 else 's' }}</span>
+      <button type="button" class="btn" data-close-modal>Close</button>
+    </span>
+  </header>
+
+  <div class="contents-body">
+    {% if page.blocks %}
+      <ol class="contents-list">
+        {% include "sections/_partials/contents_rows.html" %}
+      </ol>
+    {% else %}
+      <p class="check-note">
+        Nothing stored for this document yet. Run Section on it first.
+      </p>
+    {% endif %}
+  </div>
+</dialog>

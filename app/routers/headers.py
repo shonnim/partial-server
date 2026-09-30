@@ -16,9 +16,10 @@ from app.services.header_extraction import (
     save_headers,
 )
 from app.services.header_pages import (
-    DEFAULT_PAGES,
-    MAX_PAGES,
-    MIN_PAGES,
+    DEFAULT_END_PAGE,
+    DEFAULT_START_PAGE,
+    MAX_PAGE_SPAN,
+    range_error,
     run_pages,
 )
 from app.services.headers import MAX_CHECK_BATCH, check_has_header, load_content_list
@@ -67,9 +68,9 @@ def headers_page(request: Request, db: Session = Depends(get_db)) -> HTMLRespons
             "failed": failed,
             "max_batch": MAX_CHECK_BATCH,
             "methods": list(ExtractionMethod),
-            "default_pages": DEFAULT_PAGES,
-            "min_pages": MIN_PAGES,
-            "max_pages": MAX_PAGES,
+            "default_start_page": DEFAULT_START_PAGE,
+            "default_end_page": DEFAULT_END_PAGE,
+            "max_page_span": MAX_PAGE_SPAN,
         },
     )
 
@@ -113,7 +114,8 @@ def headers_get(
     request: Request,
     selection: str = Form(""),
     method: str = Form(ExtractionMethod.MANUAL.value),
-    pages: int = Form(DEFAULT_PAGES),
+    start_page: int = Form(DEFAULT_START_PAGE),
+    end_page: int = Form(DEFAULT_END_PAGE),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     """Open extraction on a selection: check first, skip NO, queue the rest.
@@ -130,10 +132,10 @@ def headers_get(
     except ValueError:
         return _result(request, {"error": f"Unknown method {method!r}."})
 
-    if chosen is ExtractionMethod.PAGES and not MIN_PAGES <= pages <= MAX_PAGES:
-        return _result(
-            request, {"error": f"Pages must be between {MIN_PAGES} and {MAX_PAGES}."}
-        )
+    if chosen is ExtractionMethod.PAGES:
+        range_problem = range_error(start_page, end_page)
+        if range_problem is not None:
+            return _result(request, {"error": f"Page range: {range_problem}."})
 
     doc_ids, error = _resolve_selection(db, selection)
     if error:
@@ -142,7 +144,11 @@ def headers_get(
     return templates.TemplateResponse(
         request,
         "headers/_partials/gate_result.html",
-        {"gate": prepare_for_extraction(db, doc_ids, chosen), "pages": pages},
+        {
+            "gate": prepare_for_extraction(db, doc_ids, chosen),
+            "start_page": start_page,
+            "end_page": end_page,
+        },
     )
 
 
@@ -154,7 +160,8 @@ def headers_get(
 def header_pages_run(
     request: Request,
     document_id: uuid.UUID,
-    pages: int = Form(DEFAULT_PAGES),
+    start_page: int = Form(DEFAULT_START_PAGE),
+    end_page: int = Form(DEFAULT_END_PAGE),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     """Run the Pages method on one document and report the outcome as a row.
@@ -169,7 +176,7 @@ def header_pages_run(
     return templates.TemplateResponse(
         request,
         "headers/_partials/pages_row.html",
-        {"result": run_pages(db, doc, pages)},
+        {"result": run_pages(db, doc, start_page, end_page)},
     )
 
 

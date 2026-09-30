@@ -6,7 +6,12 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.services.documents import get_document
-from app.services.sections import MAX_SECTION_BATCH, build_queue, run_sections
+from app.services.sections import (
+    MAX_SECTION_BATCH,
+    build_queue,
+    document_contents,
+    run_sections,
+)
 from app.services.tree import (
     DEFAULT_FILE_PAGE,
     list_level,
@@ -102,3 +107,30 @@ def sections_run_one(
         "sections/_partials/row_status.html",
         {"result": run_sections(db, doc)},
     )
+
+
+@router.get(
+    "/{document_id}/contents",
+    response_class=HTMLResponse,
+    name="sections_contents",
+)
+def sections_contents(
+    request: Request,
+    document_id: uuid.UUID,
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """The blocks a Section run stored for one document, a page at a time.
+
+    The first page comes back as the pop-up; every page after it as the rows
+    alone, which the "load more" button appends in place.
+    """
+    doc = _document_or_404(db, document_id)
+    page = document_contents(db, doc.id, offset=offset)
+    template = (
+        "sections/_partials/contents_rows.html"
+        if offset
+        else "sections/_partials/contents_modal.html"
+    )
+
+    return templates.TemplateResponse(request, template, {"doc": doc, "page": page})

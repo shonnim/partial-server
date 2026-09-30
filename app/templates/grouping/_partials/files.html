@@ -1,0 +1,36 @@
+{#
+  Document rows for one folder, plus the "load more" button when the folder
+  holds more than a page of them. The button replaces itself with the next
+  batch, so a folder of 800 files still arrives 50 at a time.
+
+  The group pill is the row's current label. grouping.js rewrites it in place
+  after a save, so the tree reflects the new grouping without a reload.
+#}
+{% for file in level.files %}
+  <li class="tree-node is-file" data-id="{{ file.id }}">
+    <div class="tree-row">
+      <input type="checkbox" class="tree-check" data-kind="file"
+             value="{{ file.id }}" aria-label="Select {{ file.filename }}">
+      <span class="tree-icon">📄</span>
+      <span class="tree-name" title="{{ file.filename }}">{{ file.filename }}</span>
+      <span class="tree-badges">
+        <span class="group-cell">{% if file.group_id %}<span class="pill group" title="group id">🏷 {{ file.group_id }}</span>{% endif %}</span>
+        <span class="pill total">{{ file.pages if file.pages is not none else '—' }} p</span>
+        <span class="pill total">{{ file.size_bytes|filesize }}</span>
+        <a class="btn tree-view btn-pdf" data-viewer
+           href="{{ url_for('document_viewer', document_id=file.id) }}">PDF</a>
+      </span>
+    </div>
+  </li>
+{% endfor %}
+
+{% if level.remaining_files %}
+  <li class="tree-more">
+    <button type="button" class="btn"
+            hx-get="{{ url_for('grouping_nodes') }}?path={{ level.path|urlencode }}&offset={{ level.next_offset }}"
+            hx-target="closest .tree-more"
+            hx-swap="outerHTML">
+      ↓ Load {{ level.remaining_files }} more
+    </button>
+  </li>
+{% endif %}

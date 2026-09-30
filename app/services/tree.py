@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.mineru import BACKEND
 from app.models.document import DocumentStatus, HasHeader
 from app.schemas.header import TreeSelection
 
@@ -41,10 +42,29 @@ class FolderNode:
     # Documents beneath this folder that already have headers stored. When it
     # is every one of them, the folder has nothing left to select.
     with_headers: int
+    # Documents beneath this folder whose latest parse already used the VLM
+    # engine. When it is every one of them, the Parsing page has nothing left
+    # to select there.
+    with_vlm: int = 0
+    # Documents beneath this folder that already have content blocks stored.
+    # When it is every one of them, the Section page has nothing left to
+    # select there.
+    with_contents: int = 0
+    # Documents beneath this folder that already carry a group id. The
+    # Grouping page shows it so a half-labelled folder stands out.
+    with_group: int = 0
 
     @property
     def all_stored(self) -> bool:
         return self.total > 0 and self.with_headers == self.total
+
+    @property
+    def all_vlm(self) -> bool:
+        return self.total > 0 and self.with_vlm == self.total
+
+    @property
+    def all_sectioned(self) -> bool:
+        return self.total > 0 and self.with_contents == self.total
 
 
 @dataclass(frozen=True)
@@ -71,6 +91,8 @@ class FileNode:
     # How many content blocks have been stored under this document's headers.
     # The Section page disables the row once there are any.
     content_count: int = 0
+    # The label assigned on the Grouping page, or None when never grouped.
+    group_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -113,24 +135,37 @@ def child_folders(db: Session, path: str) -> list[FolderNode]:
     rows = db.execute(
         text(f"""
             WITH scoped AS (
-                SELECT status, {_FOLDER_EXPR} AS folder,
+                SELECT status, group_id, {_FOLDER_EXPR} AS folder,
                        EXISTS (
                            SELECT 1 FROM headers h WHERE h.doc_id = documents.id
-                       ) AS stored
+                       ) AS stored,
+                       EXISTS (
+                           SELECT 1 FROM header_contents hc
+                           WHERE hc.doc_id = documents.id
+                       ) AS sectioned,
+                       (
+                           SELECT p.backend FROM parsed_docs p
+                           WHERE p.doc_id = documents.id
+                           ORDER BY p.id DESC
+                           LIMIT 1
+                       ) AS latest_backend
                 FROM documents
                 WHERE :path = '' OR starts_with(s3_key, :path || '/')
             )
             SELECT split_part(folder, '/', :child_depth) AS name,
                    count(*) AS total,
                    count(*) FILTER (WHERE status = 'FAILED') AS failed,
-                   count(*) FILTER (WHERE stored) AS with_headers
+                   count(*) FILTER (WHERE stored) AS with_headers,
+                   count(*) FILTER (WHERE latest_backend = :vlm_backend) AS with_vlm,
+                   count(*) FILTER (WHERE sectioned) AS with_contents,
+                   count(*) FILTER (WHERE group_id IS NOT NULL) AS with_group
             FROM scoped
             WHERE folder IS NOT NULL
               AND split_part(folder, '/', :child_depth) <> ''
             GROUP BY 1
             ORDER BY 1
         """),
-        {"path": path, "child_depth": child_depth},
+        {"path": path, "child_depth": child_depth, "vlm_backend": BACKEND},
     ).all()
 
     return [
@@ -140,6 +175,9 @@ def child_folders(db: Session, path: str) -> list[FolderNode]:
             total=r.total,
             failed=r.failed,
             with_headers=r.with_headers,
+            with_vlm=r.with_vlm,
+            with_contents=r.with_contents,
+            with_group=r.with_group,
         )
         for r in rows
     ]
@@ -168,6 +206,7 @@ def folder_files(
         text(f"""
             SELECT documents.id, documents.filename, documents.size_bytes,
                    documents.pages, documents.status, documents.has_header,
+                   documents.group_id,
                    (
                        SELECT count(*) FROM headers h WHERE h.doc_id = documents.id
                    ) AS header_count,
@@ -208,6 +247,7 @@ def folder_files(
             parse_backend=r.parse_backend,
             parse_status=DocumentStatus(r.parse_status) if r.parse_status else None,
             content_count=r.content_count,
+            group_id=r.group_id,
         )
         for r in rows
     ]

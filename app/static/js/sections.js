@@ -59,9 +59,13 @@
     const cell = row.querySelector(".content-count");
     if (cell) {
       cell.dataset.count = String(count);
-      cell.innerHTML = count
-        ? `<span class="pill contents">${plural(count, "block")}</span>`
-        : "";
+      // The same link the server renders, so a row a run just filled opens
+      // its blocks without a reload.
+      const href = cell.dataset.contentsUrl || "";
+      cell.innerHTML =
+        count && href
+          ? `<a class="pill contents" data-viewer title="the blocks stored for this document" href="${href}">${plural(count, "block")}</a>`
+          : "";
     }
 
     const box = row.querySelector(":scope > .tree-row > .tree-check");

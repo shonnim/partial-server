@@ -1,19 +1,18 @@
 """The Pages method: read the contents page out of the PDF, then extract.
 
 The manual method needs someone to copy a contents page out of a PDF by hand.
-This one does the copying: the content list a parse run left behind says which
-page the contents are on, the parsing service is asked for just that page and
-the few after it, and the markdown it returns goes through the same model call
-the paste would have.
+This one does the copying: the parsing service is asked for the page range
+typed into the toolbar, and the markdown it returns goes through the same
+model call the paste would have.
 
 One document at a time, on purpose. A call to the parsing service is a VLM
 pass over several pages and the model call after it is not quick either, so
 the browser walks the queue and asks for one document per request. That is
 what keeps a batch of fifty from being one fifty-minute HTTP request.
 
-Nothing here guesses. If the content list has no marker, if the PDF cannot
-be read, if the parsed pages turn out not to hold a contents page — the
-document is reported as failed with the reason, and no headers are written.
+Nothing here guesses. If the range is not valid, if the PDF cannot be read,
+if the parsed pages turn out not to hold a contents page — the document is
+reported as failed with the reason, and no headers are written.
 """
 
 import re
@@ -30,14 +29,18 @@ from app.services.header_extraction import (
     extract_headers,
     save_headers,
 )
-from app.services.headers import contents_page_index, find_marker, load_content_list
+from app.services.headers import find_marker, load_content_list
 from app.storage import ObjectNotFound, read_object
 
-# How many pages after the contents page are sent along with it. The end page
-# is ``start + pages`` (inclusive), which is what the request asks for.
-DEFAULT_PAGES = 3
-MIN_PAGES = 1
-MAX_PAGES = 10
+# The page range typed into the toolbar: 1-based page numbers, the way a PDF
+# viewer counts them, inclusive at both ends. The parser's start_page_id and
+# end_page_id are 0-based, so each is sent one lower. The same range is used
+# for every document in a queue.
+DEFAULT_START_PAGE = 3
+DEFAULT_END_PAGE = 3
+# The most pages past the start one request may ask for: every page is a VLM
+# pass, so a typo like 3..300 would hold the queue for an hour.
+MAX_PAGE_SPAN = 10
 
 # The whole PDF is uploaded to the parsing service, whichever pages it is
 # asked for, so a source file has to fit in memory here first.
@@ -62,6 +65,7 @@ class PagesResult:
     filename: str
     #: Rows written. None when the run failed before saving anything.
     saved: int | None = None
+    #: The pages parsed, 1-based as typed (after trimming to the last page).
     start_page: int | None = None
     end_page: int | None = None
     parse_seconds: float | None = None
@@ -73,17 +77,30 @@ class PagesResult:
         return self.error is None
 
 
-def page_range(start: int, pages: int, total: int | None) -> tuple[int, int]:
-    """The 0-based inclusive range to parse, clamped to the document's length.
+def range_error(start: int, end: int) -> str | None:
+    """Why ``start``..``end`` cannot be sent to the parser, or None if it can."""
+    if start < 1:
+        return "start page must be 1 or more"
+    if end < start:
+        return "end page must not be before the start page"
+    if end - start > MAX_PAGE_SPAN:
+        return f"at most {MAX_PAGE_SPAN} pages past the start page"
+    return None
 
-    ``total`` is the page count a parse recorded, when one did. A range that
-    runs past the end is trimmed rather than rejected: the contents page of a
-    short document is still worth reading.
+
+def page_range(start: int, end: int, total: int | None) -> tuple[int, int] | None:
+    """The 1-based inclusive range to parse, clamped to the document's length.
+
+    ``total`` is the page count a parse recorded, when one did. An end that
+    runs past the last page is trimmed rather than rejected: the contents page
+    of a short document is still worth reading. A start past the last page
+    leaves nothing to read, and gives None.
     """
-    end = start + pages
-    if total is not None and total > start:
-        end = min(end, total - 1)
-    return start, max(start, end)
+    if total is None:
+        return start, end
+    if start > total:
+        return None
+    return start, min(end, total)
 
 
 def contents_section(markdown: str) -> str:
@@ -128,8 +145,14 @@ def contents_section(markdown: str) -> str:
     return "\n".join(lines[start:end])
 
 
-def run_pages(db: Session, document: Document, pages: int) -> PagesResult:
-    """Extract and store the headers of one document from its PDF pages."""
+def run_pages(
+    db: Session, document: Document, start_page: int, end_page: int
+) -> PagesResult:
+    """Extract and store the headers of one document from its PDF pages.
+
+    ``start_page`` and ``end_page`` are 1-based and inclusive; the parser gets
+    them one lower, as its 0-based ``start_page_id`` and ``end_page_id``.
+    """
 
     def failed(
         reason: str,
@@ -147,21 +170,26 @@ def run_pages(db: Session, document: Document, pages: int) -> PagesResult:
             error=reason,
         )
 
-    if not MIN_PAGES <= pages <= MAX_PAGES:
-        return failed(f"pages must be between {MIN_PAGES} and {MAX_PAGES}")
+    error = range_error(start_page, end_page)
+    if error is not None:
+        return failed(error)
 
     if document.has_header is not HasHeader.YES:
         return failed("not marked as having a contents page — run Has Header first")
 
+    # The content list fills each header's page indexes when it is saved; the
+    # range itself comes from the toolbar, not from here.
     blocks, error = load_content_list(db, document)
     if error is not None:
         return failed(error)
 
-    start = contents_page_index(blocks)
-    if start is None:
-        return failed("no contents marker with a page index in the content list")
-
-    start, end = page_range(start, pages, document.pages)
+    clamped = page_range(start_page, end_page, document.pages)
+    if clamped is None:
+        return failed(
+            f"start page {start_page} is past the last page "
+            f"(the document has {document.pages})"
+        )
+    start, end = clamped
 
     try:
         pdf, oversized = read_object(
@@ -174,18 +202,20 @@ def run_pages(db: Session, document: Document, pages: int) -> PagesResult:
 
     began = time.monotonic()
     try:
-        markdown = parse_pages(pdf, document.filename, start_page=start, end_page=end)
+        markdown = parse_pages(
+            pdf, document.filename, start_page=start - 1, end_page=end - 1
+        )
     except DocExtractError as exc:
         return failed(str(exc), start_page=start, end_page=end)
     parse_seconds = time.monotonic() - began
 
-    # The content list's page index is not guaranteed to be the PDF's: a run
-    # over a two-up layout numbers spreads, not pages. Body text sent to the
-    # model would come back as invented headings, so it is refused here.
+    # A range that misses the contents page parses to body text, and body text
+    # sent to the model would come back as invented headings, so it is refused
+    # here.
     if find_marker(markdown) is None:
         return failed(
             f"pages {start}–{end} parsed, but no contents marker was in them; "
-            "the content list's page_idx may not match the PDF's pages",
+            "check the page range",
             start_page=start,
             end_page=end,
             parse_seconds=parse_seconds,

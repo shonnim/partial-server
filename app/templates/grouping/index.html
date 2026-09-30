@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Grouping · partial-server{% endblock %}
+{% block heading %}🏷️ Grouping{% endblock %}
+{% block subheading %}Tick files or folders, type a group id on the right, and save it onto every document picked.{% endblock %}
+
+{% block actions %}
+  <span id="tree-selection" class="toolbar-count">Nothing selected</span>
+{% endblock %}
+
+{% block content %}
+  <div class="parsing-layout">
+    <div class="parsing-main">
+      <div class="card tree-card">
+        <div class="tree-head">
+          <span class="tree-head-label">📚 Corpus</span>
+          <span class="tree-badges" id="tree-root-badges" data-total="{{ total }}">
+            {% if failed %}<span class="pill fail">✗ {{ "{:,}".format(failed) }}</span>{% endif %}
+            <span class="pill total">{{ "{:,}".format(total) }}</span>
+            <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
+          </span>
+        </div>
+
+        <ul class="tree tree-children" id="tree-root">
+          {% include "grouping/_partials/level.html" %}
+        </ul>
+      </div>
+    </div>
+
+    {#- The group id form sits beside the tree. Both buttons post the same
+        selection; Save sends the typed label and Clear sends clear=1 so the
+        label is set back to nothing. -#}
+    <aside class="side-panel">
+      <section class="card side-box" id="group-box">
+        <div class="side-box-head">
+          <span class="side-box-title">🏷️ Group id</span>
+        </div>
+        <form id="group-form"
+              hx-post="{{ url_for('grouping_assign') }}"
+              hx-vals="js:{selection: window.treeSelectionJSON()}"
+              hx-target="#group-result"
+              hx-swap="innerHTML"
+              hx-indicator="#group-spinner">
+          <label class="group-label" for="group-id">Group id</label>
+          <input type="text" class="group-input" id="group-id" name="group_id"
+                 list="known-groups" autocomplete="off" spellcheck="false"
+                 maxlength="{{ max_length }}" placeholder="e.g. budget-2024">
+          <datalist id="known-groups">
+            {% for name in known_groups %}<option value="{{ name }}">{% endfor %}
+          </datalist>
+          <div class="side-box-actions group-actions">
+            <button type="submit" class="btn btn-primary" id="btn-save-group">
+              💾 Save group id
+            </button>
+            <button type="submit" class="btn ghost" id="btn-clear-group"
+                    name="clear" value="1"
+                    title="Remove the group id from the selected documents">
+              ✕ Clear
+            </button>
+            <span class="spinner" id="group-spinner"></span>
+          </div>
+        </form>
+        <p class="side-note">
+          Applies to every ticked document, including everything under a ticked
+          folder · at most <strong>{{ "{:,}".format(max_batch) }}</strong> per click.
+        </p>
+      </section>
+
+      {#- Where the Save button's reply lands. Empty until the first click. -#}
+      <div id="group-result"></div>
+    </aside>
+  </div>
+
+  {#- The viewer pop-up, same as on the documents list. -#}
+  <div id="modal"></div>
+
+  <script src="{{ static_url('js/viewer-modal.js') }}" defer></script>
+  <script src="{{ static_url('js/tree.js') }}" defer></script>
+  <script src="{{ static_url('js/grouping.js') }}" defer></script>
+{% endblock %}

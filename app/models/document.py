@@ -47,6 +47,9 @@ class Document(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     content_type: Mapped[str] = mapped_column(String(255), nullable=False)
     category: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
+    # A free-text label assigned on the Grouping page. Documents that share
+    # one are handled together downstream; NULL means never grouped.
+    group_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     has_header: Mapped[HasHeader] = mapped_column(
         Enum(HasHeader, name="document_has_header", native_enum=True),
         nullable=False,

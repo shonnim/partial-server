@@ -24,7 +24,7 @@
     <button type="button" class="btn btn-manual" id="btn-get-header" disabled
             title="Pick a method other than Manual"
             hx-post="{{ url_for('headers_get') }}"
-            hx-vals="js:{selection: window.treeSelectionJSON(), method: window.headerMethod(), pages: window.headerPages()}"
+            hx-vals="js:{selection: window.treeSelectionJSON(), method: window.headerMethod(), ...window.headerPageRange()}"
             hx-target="#header-result"
             hx-swap="innerHTML"
             hx-indicator="#header-spinner">
@@ -38,15 +38,21 @@
         {% endfor %}
       </select>
     </label>
-    {#- Only the Pages method reads this: how many pages after the contents
-        page go to the parser (end page = start + pages). It appears when
-        Pages is picked and is hidden under any other method. -#}
-    <label class="method-picker" id="pages-picker" hidden>
+    {#- Only the Pages method reads these: the page range to parse, 1-based as
+        a PDF viewer counts, inclusive. The parser gets each one lower as its
+        0-based start_page_id and end_page_id. The same range is used for
+        every document in the queue. They appear when Pages is picked and are
+        hidden under any other method. -#}
+    <div class="method-picker" id="pages-picker" hidden>
       <span class="method-label">pages</span>
-      <input type="number" id="header-pages" name="pages" class="pages-input"
-             value="{{ default_pages }}" min="{{ min_pages }}" max="{{ max_pages }}" step="1"
-             title="Pages after the contents page to parse (end page = start + pages, inclusive)">
-    </label>
+      <input type="number" id="header-start-page" name="start_page" class="pages-input"
+             value="{{ default_start_page }}" min="1" step="1"
+             title="First PDF page to parse, as a viewer numbers it (sent as start_page_id = page − 1)">
+      <span class="method-label">–</span>
+      <input type="number" id="header-end-page" name="end_page" class="pages-input"
+             value="{{ default_end_page }}" min="1" step="1"
+             title="Last PDF page to parse, inclusive, at most {{ max_page_span }} past the start (sent as end_page_id = page − 1)">
+    </div>
     <span class="spinner" id="header-spinner"></span>
     <span class="toolbar-spacer"></span>
     <span class="toolbar-count">

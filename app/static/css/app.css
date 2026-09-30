@@ -465,6 +465,90 @@ table.docs tbody tr:hover { background: var(--accent-tint); }
   color: var(--tint-md);
 }
 .content-count:empty { display: none; }
+/* The count is also the way into the rows it counts. */
+a.pill.contents { text-decoration: none; cursor: pointer; }
+a.pill.contents:hover { background: color-mix(in srgb, var(--tint-md) 22%, #fff); }
+
+/* ---------- stored blocks ---------- */
+
+/* What a Section run wrote, read back. Everything is shown as it sits in
+   header_contents — a table's content is the parser's HTML, not a rendered
+   table — so the type, the order and the text are all the reviewer has to
+   go on, and each gets its own line rather than a column in a table. */
+.contents-body { flex: 1; min-height: 0; padding: 14px 18px 20px; overflow-y: auto; }
+.contents-list { margin: 0; padding: 0; list-style: none; }
+
+.contents-head {
+  position: sticky;
+  top: -14px;
+  z-index: 1;
+  margin: 16px 0 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+}
+.contents-list > .contents-head:first-child { margin-top: 0; }
+.contents-head-title { font-size: 12.5px; font-weight: 680; color: var(--ink); }
+.contents-head-title.is-none { color: var(--ink-soft); font-weight: 600; font-style: italic; }
+
+.contents-block {
+  margin: 0 0 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+.contents-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-bottom: 7px; }
+.contents-order {
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.contents-bbox {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: .7;
+}
+/* One tint per block type: scanning for the images in a long document is
+   the thing this pop-up is opened for most. */
+.pill.kind { background: #f1f3fb; color: var(--ink-soft); font-weight: 650; }
+.pill.kind-table { background: color-mix(in srgb, var(--tint-json) 14%, #fff); color: var(--tint-json); }
+.pill.kind-image { background: color-mix(in srgb, var(--tint-pdf) 14%, #fff); color: var(--tint-pdf); }
+.pill.kind-chart { background: color-mix(in srgb, var(--tint-outline) 14%, #fff); color: var(--tint-outline); }
+
+.contents-field { margin: 0 0 6px; font-size: 12.5px; line-height: 1.6; }
+.contents-field:last-child { margin-bottom: 0; }
+.contents-label {
+  display: inline-block;
+  margin-right: 7px;
+  color: var(--ink-soft);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+}
+.contents-field.is-caption { color: var(--ink); font-weight: 600; }
+.contents-field.is-footnote { color: var(--ink-soft); font-size: 12px; }
+.contents-field.is-empty { color: var(--ink-soft); font-style: italic; }
+/* Stored text, wrapped: a table's HTML is one long line, and a reviewer
+   needs to read it, not scroll sideways through it. */
+.contents-field.is-content {
+  max-height: 320px;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+  color: var(--ink);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+
+.contents-more { list-style: none; margin: 12px 0 0; text-align: center; }
 
 /* ---------- viewer ---------- */
 
@@ -710,6 +794,31 @@ dialog.modal::backdrop { background: rgba(30, 35, 66, .46); backdrop-filter: blu
 
 .check-result { padding: 14px 16px; margin-bottom: 16px; }
 .check-result.is-error { color: var(--fail); }
+
+/* On the Section page the queue card is nothing but its strip, and the strip
+   already draws its own edge — so the card's chrome and the gap it keeps
+   below itself are dropped rather than nested one inside the other. An error
+   has no strip to draw it, so it keeps the card. */
+#section-result .check-result {
+  padding: 0;
+  margin-bottom: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+#section-result .check-result.is-error { padding: 12px 14px; border: 1px solid var(--line); background: var(--panel); }
+#section-result .run-strip { margin-top: 0; }
+
+/* On the Parsing page the queue card sits under the service box, in a column
+   too narrow for a row on one line: the file name gets its own line and the
+   status and buttons wrap beneath it. The column is sticky, so a full batch
+   scrolls inside the card rather than running off the bottom of the screen. */
+#parse-result .check-result { margin-bottom: 0; }
+#parse-result .gate-queue,
+#parse-result .check-failures { max-height: 50vh; overflow-y: auto; }
+#parse-result .gate-row { flex-wrap: wrap; gap: 6px 8px; }
+#parse-result .gate-row .gate-name { flex: 1 1 100%; max-width: 100%; }
+#parse-result .gate-status { justify-content: flex-start; }
 .check-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
 .check-failures {
@@ -1270,3 +1379,49 @@ dialog.modal-manual { width: min(820px, 94vw); height: min(700px, 88vh); }
 .run-log-rule { height: 0; margin: 4px 0; border-top: 2px dashed var(--line); }
 .run-log::-webkit-scrollbar { width: 8px; }
 .run-log::-webkit-scrollbar-thumb { background: #cfd4e6; border-radius: 4px; }
+
+/* ---------- grouping page ---------- */
+
+/* The label a document carries, on tree rows, folder badges and the result
+   card alike. Folders show a count, files show the label itself. */
+.pill.group {
+  background: color-mix(in srgb, var(--accent) 12%, #fff);
+  color: var(--accent);
+  font-weight: 650;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-cell:empty { display: none; }
+
+.group-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+}
+.group-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  transition: border-color var(--ease), box-shadow var(--ease), background var(--ease);
+}
+.group-input::placeholder { color: var(--ink-faint); }
+.group-input:hover { border-color: #d2d8ec; }
+.group-input:focus {
+  outline: none;
+  background: var(--panel);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+.group-actions { margin-bottom: 10px; }
+#group-result .check-result { margin-bottom: 0; }

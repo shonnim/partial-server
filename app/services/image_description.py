@@ -4,7 +4,7 @@ The parser leaves a figure as a crop in the run's ``images/`` folder, with
 whatever caption and footnote text stood beside it on the page. Pixels are
 not searchable; the vision model is asked to say what the figure shows, in
 Korean, with the footnote folded in as context, and that description is what
-``header_contents.text`` holds for the block.
+``header_contents.content`` holds for the block.
 
 The crop is read from RustFS and sent inline as base64: the vision server
 has no way to reach this panel's image URLs. One call per image, no retry —
@@ -75,6 +75,8 @@ class DescribedImage:
 
     text: str
     caption: str | None
+    #: The footnote printed under the figure, as the page gave it.
+    footnote: str | None
     #: The crop's file name inside the run's images folder.
     image_name: str
 
@@ -147,4 +149,6 @@ def describe_image_block(
     except LLMError as exc:
         raise ImageDescriptionError(str(exc)) from exc
 
-    return DescribedImage(text=text.strip(), caption=caption, image_name=name)
+    return DescribedImage(
+        text=text.strip(), caption=caption, footnote=footnote, image_name=name
+    )

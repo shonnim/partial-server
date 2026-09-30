@@ -9,7 +9,8 @@
   sectioned document into a batch is never what someone meant.
 
   The two counts on the row are the two halves of this screen: how many
-  headers there are to file under, and how many blocks have been filed.
+  headers there are to file under, and how many blocks have been filed. The
+  block count opens what was filed — the rows themselves, as stored.
 #}
 {% for file in level.files %}
   <li class="tree-node is-file" data-id="{{ file.id }}">
@@ -25,8 +26,10 @@
             nothing is stored. -#}
         <span class="header-count" data-count="{{ file.header_count }}">{% if file.header_count %}<span class="pill headers">{{ file.header_count }} header{{ '' if file.header_count == 1 else 's' }}</span>{% endif %}</span>
         {#- Same rule: empty means "not sectioned yet". sections.js fills it
-            in when a run finishes on this row. -#}
-        <span class="content-count" data-count="{{ file.content_count }}">{% if file.content_count %}<span class="pill contents">{{ file.content_count }} block{{ '' if file.content_count == 1 else 's' }}</span>{% endif %}</span>
+            in when a run finishes on this row, and reads data-contents-url to
+            rebuild the link without a reload. -#}
+        <span class="content-count" data-count="{{ file.content_count }}"
+              data-contents-url="{{ url_for('sections_contents', document_id=file.id) }}">{% if file.content_count %}<a class="pill contents" data-viewer title="the blocks stored for this document" href="{{ url_for('sections_contents', document_id=file.id) }}">{{ file.content_count }} block{{ '' if file.content_count == 1 else 's' }}</a>{% endif %}</span>
         <span class="pill total">{{ file.pages if file.pages is not none else '—' }} p</span>
         <span class="pill total">{{ file.size_bytes|filesize }}</span>
 

@@ -13,11 +13,11 @@
 {% set live = gate.method.value == 'pages' %}
 <div class="card check-result"
      data-updates='{{ gate.updates|tojson }}'
-     {% if live %}data-run="pages" data-pages="{{ pages }}"{% endif %}>
+     {% if live %}data-run="pages" data-start-page="{{ start_page }}" data-end-page="{{ end_page }}"{% endif %}>
   <div class="check-summary">
     <span class="pill total">method: {{ gate.method.label }}</span>
     {% if live %}
-      <span class="pill total">+{{ pages }} page{{ '' if pages == 1 else 's' }} after the contents page</span>
+      <span class="pill total" title="PDF pages to parse, as a viewer numbers them">p. {{ start_page }}–{{ end_page }}</span>
     {% endif %}
     <span class="pill ok">✓ {{ gate.eligible|length }} eligible</span>
     {% if gate.skipped %}

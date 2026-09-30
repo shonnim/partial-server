@@ -1,4 +1,4 @@
-"""Filing a document's parsed blocks under its headers: the Section run.
+r"""Filing a document's parsed blocks under its headers: the Section run.
 
 A parse run leaves a content list — every block the parser read, in reading
 order, each with a type, a bounding box and a page index. Header extraction
@@ -15,28 +15,38 @@ to the most recent header whose start is at or before it. Blocks before the
 first header's start — the cover, the contents page — belong to the document
 and to no header, and are stored with ``header_id`` NULL.
 
+A row holds the block's body in ``content``, and — for the block types the
+parser prints one beside — the ``caption`` and the ``footnote`` that stood
+with it on the page. The parser writes captions and footnotes as lists of
+strings; a list is stored as one text with a newline between its parts, so a
+caption split over two printed lines is kept as it was printed.
+
+Every text stored here first comes off the parser's markdown escaping (see
+``parser_text``): the backslashes it puts before ``*``, ``~`` and ``-`` are
+its own, and a line opening ``\-`` is the bullet ∙ the page printed, not a
+hyphen. Table bodies are the exception — they are HTML, never escaped, and
+are stored exactly as they came.
+
 What is stored, by block type:
 
 * ``header``, ``footer``, ``aside_text``, ``page_number`` — page furniture,
   never stored.
 * ``text``, ``page_footnote`` — stored when the text is not empty.
-* ``list`` — the items joined as one text.
-* ``table`` — the HTML body is turned into Markdown deterministically (see
-  ``html_table``): spans expanded, the header flattened, the caption above
-  and the footnotes below; the Markdown is the text, the caption in
-  ``caption``. No model is involved. A table the parser gave no body for
+* ``list`` — the items joined as one content.
+* ``table`` — the HTML body as the parser gave it, verbatim, in ``content``;
+  ``table_caption`` and ``table_footnote`` in their own columns. Nothing is
+  converted and no model is involved. A table the parser gave no body for
   keeps its caption and footnotes only.
-* ``chart`` — the parser's reading of the chart plus its footnotes as text,
-  its caption in ``caption``.
+* ``chart`` — the parser's reading of the chart in ``content``, with
+  ``chart_caption`` and ``chart_footnote`` in their own columns.
 * ``image`` — the crop is read from storage and described in Korean by the
-  vision model (see ``image_description``); the description is the text,
-  the caption in ``caption``.
+  vision model (see ``image_description``); the description is the content,
+  with ``image_caption`` and ``image_footnote`` in their own columns.
 * anything else with a text — stored under its own type.
 
-A document is written all at once or not at all. Every table is converted
-and every image described first, and only then are the previous rows
-replaced; a table whose HTML cannot be read safely, or an image that cannot
-be described, fails the whole document with the reason, and the rows it had
+A document is written all at once or not at all. Every image is described
+first, and only then are the previous rows replaced; an image that cannot be
+described fails the whole document with the reason, and the rows it had
 before are left as they were.
 """
 
@@ -55,8 +65,8 @@ from app.models.document import Document
 from app.models.header import Header, HeaderContent
 from app.services.header_extraction import _title_key, header_count, locate_heading
 from app.services.headers import contents_page_index, load_content_list
-from app.services.html_table import TableParseError, convert_html_table
 from app.services.image_description import ImageDescriptionError, describe_image_block
+from app.services.parser_text import unescape
 from app.services.table_normalizer import join_fragments
 
 logger = logging.getLogger(__name__)
@@ -75,12 +85,8 @@ SKIPPED_TYPES = frozenset({"header", "footer", "aside_text", "page_number"})
 DEFERRED_TYPES: frozenset[str] = frozenset()
 
 # What goes between the items of a list block when they are stored as one
-# text. Space, newline, space: each item on its own line, the bullets kept.
+# content. Space, newline, space: each item on its own line, the bullets kept.
 LIST_ITEM_JOIN = " \n "
-
-# What goes between a chart's content and its footnotes, and between the
-# footnotes themselves.
-CHART_PART_JOIN = "\n"
 
 
 @dataclass(frozen=True)
@@ -152,6 +158,80 @@ def content_count(db: Session, doc_id: uuid.UUID) -> int:
             .where(HeaderContent.doc_id == doc_id)
         )
         or 0
+    )
+
+
+# ---- reading the rows back ---------------------------------------------------
+
+#: How many blocks one page of the contents pop-up holds. A document runs to
+#: hundreds of them, so the pop-up asks for the next page rather than
+#: everything at once.
+CONTENTS_PAGE = 50
+
+
+@dataclass(frozen=True)
+class StoredBlock:
+    """One ``header_contents`` row with the heading it was filed under."""
+
+    row: HeaderContent
+    #: The header's text; None for a block stored before the first heading.
+    header: str | None
+
+
+@dataclass(frozen=True)
+class ContentsPage:
+    """One page of a document's stored blocks, in the order they were filed."""
+
+    blocks: list[StoredBlock]
+    #: Rows the document has in all, not just on this page.
+    total: int
+    offset: int
+    #: Where the next page starts; None when this page is the last.
+    next_offset: int | None
+
+    @property
+    def remaining(self) -> int:
+        return max(self.total - (self.offset + len(self.blocks)), 0)
+
+
+def document_contents(
+    db: Session, doc_id: uuid.UUID, offset: int = 0, limit: int = CONTENTS_PAGE
+) -> ContentsPage:
+    """One page of what a Section run stored for a document, in reading order.
+
+    ``order`` is what the run wrote, so it is what the page is read back by;
+    ``id`` settles the order of anything written before that column existed.
+    The heading each block sits under is looked up for the page in hand, not
+    per row.
+    """
+    total = content_count(db, doc_id)
+    rows = list(
+        db.scalars(
+            select(HeaderContent)
+            .where(HeaderContent.doc_id == doc_id)
+            .order_by(HeaderContent.order, HeaderContent.id)
+            .offset(offset)
+            .limit(limit)
+        ).all()
+    )
+
+    header_ids = {row.header_id for row in rows if row.header_id is not None}
+    titles: dict[int, str] = {}
+    if header_ids:
+        titles = {
+            header.id: header.header
+            for header in db.scalars(select(Header).where(Header.id.in_(header_ids))).all()
+        }
+
+    seen = offset + len(rows)
+    return ContentsPage(
+        blocks=[
+            StoredBlock(row=row, header=titles.get(row.header_id) if row.header_id else None)
+            for row in rows
+        ],
+        total=total,
+        offset=offset,
+        next_offset=seen if seen < total else None,
     )
 
 
@@ -279,7 +359,7 @@ def _bbox(block: dict[str, Any]) -> tuple[int | None, int | None, int | None, in
 def _text_of(block: dict[str, Any]) -> str | None:
     text = block.get("text")
     if isinstance(text, str) and text.strip():
-        return text
+        return unescape(text)
     return None
 
 
@@ -287,19 +367,16 @@ def _list_text(block: dict[str, Any]) -> str | None:
     items = block.get("list_items")
     if not isinstance(items, list):
         return None
-    kept = [item for item in items if isinstance(item, str) and item.strip()]
+    kept = [unescape(item) for item in items if isinstance(item, str) and item.strip()]
     return LIST_ITEM_JOIN.join(kept) if kept else None
 
 
-def _chart_text(block: dict[str, Any]) -> str | None:
-    parts = []
+def _chart_content(block: dict[str, Any]) -> str | None:
+    """A chart block's own reading of itself; its footnotes are stored apart."""
     content = block.get("content")
     if isinstance(content, str) and content.strip():
-        parts.append(content)
-    notes = join_fragments(block.get("chart_footnote"))
-    if notes:
-        parts.append(notes)
-    return CHART_PART_JOIN.join(parts) if parts else None
+        return unescape(content)
+    return None
 
 
 @dataclass
@@ -319,9 +396,8 @@ def _row_for(
 ) -> HeaderContent | None:
     """The row a block becomes, or None when it is not stored.
 
-    Raises TableParseError for a table whose HTML cannot be read safely, and
-    ImageDescriptionError for an image the vision model could not describe —
-    the caller decides what that means for the document.
+    Raises ImageDescriptionError for an image the vision model could not
+    describe — the caller decides what that means for the document.
     """
     if not isinstance(block, dict):
         tally.skipped["not a block"] += 1
@@ -349,31 +425,29 @@ def _row_for(
     )
 
     if kind == "list":
-        row.text = _list_text(block)
-        if row.text is None:
+        row.content = _list_text(block)
+        if row.content is None:
             tally.skipped["empty list"] += 1
             return None
         return row
 
     if kind == "table":
         row.caption = join_fragments(block.get("table_caption"))
+        row.footnote = join_fragments(block.get("table_footnote"))
         body = block.get("table_body")
         if not isinstance(body, str) or not body.strip():
-            # No body to convert: the caption and the notes are what the
-            # parser gave, and they are kept as they are.
-            row.text = join_fragments(block.get("table_footnote"))
+            # No body: the caption and the notes are all the parser gave.
             tally.tables_without_body += 1
             return row
-        converted = convert_html_table(
-            body, block.get("table_caption"), block.get("table_footnote")
-        )
+        # The HTML is stored as it came. Reading it is a later concern.
+        row.content = body
         tally.tables += 1
-        row.text = converted.markdown
         return row
 
     if kind == "chart":
-        row.text = _chart_text(block)
+        row.content = _chart_content(block)
         row.caption = join_fragments(block.get("chart_caption"))
+        row.footnote = join_fragments(block.get("chart_footnote"))
         tally.charts += 1
         return row
 
@@ -382,13 +456,14 @@ def _row_for(
         described = describe_image_block(db, document, block)
         tally.llm_seconds += time.monotonic() - began
         tally.images += 1
-        row.text = described.text
+        row.content = described.text
         row.caption = described.caption
+        row.footnote = described.footnote
         return row
 
     # text, page_footnote, and any other block that carries a text.
-    row.text = _text_of(block)
-    if row.text is None:
+    row.content = _text_of(block)
+    if row.content is None:
         tally.skipped[f"empty {kind}"] += 1
         return None
     return row
@@ -435,16 +510,6 @@ def run_sections(db: Session, document: Document) -> SectionResult:
         where = f"page_idx {page}" if page is not None else f"block {index}"
         try:
             row = _row_for(db, document, block, tally)
-        except TableParseError as exc:
-            # The table's HTML stays as it is in the content list; nothing
-            # is written for this document until someone has looked.
-            logger.warning(
-                "document %s: table at %s could not be converted: %s",
-                document.id,
-                where,
-                exc,
-            )
-            return failed(f"table at {where} could not be converted: {exc}")
         except ImageDescriptionError as exc:
             return failed(f"image at {where} could not be described: {exc}")
         if row is None:

@@ -12,17 +12,23 @@
     return select ? select.value : "manual";
   };
 
-  /** How many pages after the contents page the Pages method should parse. */
-  window.headerPages = () => {
-    const input = document.getElementById("header-pages");
-    return input ? input.value : "";
+  /** The page range the Pages method sends to the parser, as form values. */
+  window.headerPageRange = () => {
+    const value = (id) => {
+      const input = document.getElementById(id);
+      return input ? input.value : "";
+    };
+    return {
+      start_page: value("header-start-page"),
+      end_page: value("header-end-page"),
+    };
   };
 
   // ---- the method picker ---------------------------------------------------
 
   // Manual runs from the button on each row, so the batch button has nothing
-  // to do under it and stays off. The pages field only means something to
-  // the Pages method and appears only under it.
+  // to do under it and stays off. The page range fields only mean something
+  // to the Pages method and appear only under it.
   function syncMethod() {
     const method = window.headerMethod();
     const button = document.getElementById("btn-get-header");
@@ -134,7 +140,10 @@
     const tally = strip.querySelector("[data-run-tally]");
     const stop = strip.querySelector("[data-run-stop]");
     const button = document.getElementById("btn-get-header");
-    const pages = card.dataset.pages || "";
+    const range = {
+      start_page: card.dataset.startPage || "",
+      end_page: card.dataset.endPage || "",
+    };
 
     const run = { stopped: false, current: null, started: performance.now() };
     activeRun = run;
@@ -186,7 +195,7 @@
         await htmx.ajax("POST", row.dataset.runUrl, {
           target: row.querySelector(".gate-status"),
           swap: "innerHTML",
-          values: { pages },
+          values: range,
         });
       } catch (err) {
         row.querySelector(".gate-status").innerHTML =

@@ -29,6 +29,7 @@ from typing import Any
 
 from app.config import get_settings
 from app.llm import LLMError, chat_json
+from app.services.parser_text import unescape
 from app.services.table_markdown import render_table_markdown
 
 # How many times the model is asked before the table is given up on. The
@@ -217,23 +218,25 @@ def join_fragments(fragments: Any) -> str | None:
     """A caption or footnote list as one string, or None when there is none.
 
     The parser writes these as lists of strings; anything else is taken as
-    absent rather than guessed at.
+    absent rather than guessed at. Each part comes off the parser's markdown
+    escaping (see ``parser_text``), so a caption reads as the page printed it.
     """
     if isinstance(fragments, str):
-        text = fragments.strip()
+        text = unescape(fragments).strip()
         return text or None
     if not isinstance(fragments, list):
         return None
-    parts = [f.strip() for f in fragments if isinstance(f, str) and f.strip()]
+    parts = _fragment_list(fragments)
     return _FRAGMENT_JOIN.join(parts) if parts else None
 
 
 def _fragment_list(fragments: Any) -> list[str]:
     if isinstance(fragments, str):
-        return [fragments.strip()] if fragments.strip() else []
+        fragments = [fragments]
     if not isinstance(fragments, list):
         return []
-    return [f.strip() for f in fragments if isinstance(f, str) and f.strip()]
+    kept = (unescape(f).strip() for f in fragments if isinstance(f, str))
+    return [f for f in kept if f]
 
 
 @dataclass(frozen=True)

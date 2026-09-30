@@ -31,8 +31,6 @@
         </span>
       </div>
 
-      <div id="parse-result"></div>
-
       <div class="card tree-card">
         <div class="tree-head">
           <span class="tree-head-label">📚 Corpus</span>
@@ -80,6 +78,11 @@
           <p class="side-note">Checking…</p>
         </div>
       </section>
+
+      {#- Where the Parse docs button's reply lands: the queue, with each
+          document's status as parsing.js pushes it through. Empty until the
+          first click. -#}
+      <div id="parse-result"></div>
     </aside>
   </div>
 

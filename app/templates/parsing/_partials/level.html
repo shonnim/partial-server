@@ -6,12 +6,19 @@
   The folder name is the control: clicking it fetches the children on the first
   open ("click once") and shows or hides them after that. The open/closed state
   reads from the folder icon rather than a separate arrow.
+
+  A folder whose every document has already been parsed with vlm-engine is
+  rendered with its box disabled, the same way such a document's row is:
+  there is nothing under it a tick could take, and that is known before the
+  folder is ever opened.
 #}
 {% for folder in level.folders %}
   <li class="tree-node" data-path="{{ folder.path }}" data-total="{{ folder.total }}">
     <div class="tree-row">
       <input type="checkbox" class="tree-check" data-kind="folder"
-             aria-label="Select folder {{ folder.name }}">
+             aria-label="Select folder {{ folder.name }}"
+             {% if folder.all_vlm %}disabled
+             title="Already parsed with vlm-engine for all {{ folder.total }} document{{ '' if folder.total == 1 else 's' }}"{% endif %}>
       <button type="button" class="tree-label" aria-expanded="false"
               hx-get="{{ url_for('parsing_nodes') }}?path={{ folder.path|urlencode }}"
               hx-target="next .tree-children"

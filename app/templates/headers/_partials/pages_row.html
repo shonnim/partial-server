@@ -12,14 +12,14 @@
   <span class="pill ok" data-doc-id="{{ result.id }}" data-header-count="{{ result.saved }}">
     ✓ {{ result.saved }} header{{ '' if result.saved == 1 else 's' }}
   </span>
-  <span class="pill total" title="0-based PDF pages sent to the parser">p. {{ result.start_page }}–{{ result.end_page }}</span>
+  <span class="pill total" title="PDF pages parsed, as a viewer numbers them">p. {{ result.start_page }}–{{ result.end_page }}</span>
   <span class="pill total" title="parse · model">
     {{ '%.0f'|format(result.parse_seconds) }}s · {{ '%.0f'|format(result.llm_seconds) }}s
   </span>
 {% else %}
   <span class="pill fail">✗ failed</span>
   {% if result.start_page is not none %}
-    <span class="pill total" title="0-based PDF pages sent to the parser">p. {{ result.start_page }}–{{ result.end_page }}</span>
+    <span class="pill total" title="PDF pages parsed, as a viewer numbers them">p. {{ result.start_page }}–{{ result.end_page }}</span>
   {% endif %}
   <span class="gate-reason" title="{{ result.error }}">{{ result.error }}</span>
 {% endif %}
