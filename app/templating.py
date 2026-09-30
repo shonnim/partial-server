@@ -23,6 +23,7 @@ NAV_ITEMS = (
     {"key": "headers", "label": "Headers", "icon": "🗂️", "url": "/headers"},
     {"key": "sections", "label": "Section", "icon": "📑", "url": "/sections"},
     {"key": "grouping", "label": "Grouping", "icon": "🏷️", "url": "/grouping"},
+    {"key": "chunking", "label": "Chunking", "icon": "🧩", "url": "/chunking"},
 )
 
 

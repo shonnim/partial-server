@@ -1425,3 +1425,54 @@ dialog.modal-manual { width: min(820px, 94vw); height: min(700px, 88vh); }
 }
 .group-actions { margin-bottom: 10px; }
 #group-result .check-result { margin-bottom: 0; }
+
+/* ---------- chunking ---------- */
+
+/* Stored chunks: the Chunking page's count on a row, and the way into them. */
+.pill.chunks {
+  background: color-mix(in srgb, #7c4dbd 12%, #fff);
+  color: #7c4dbd;
+}
+a.pill.chunks { text-decoration: none; cursor: pointer; }
+a.pill.chunks:hover { background: color-mix(in srgb, #7c4dbd 22%, #fff); }
+.chunk-count:empty { display: none; }
+.pill.warn {
+  background: color-mix(in srgb, var(--tint-json) 14%, #fff);
+  color: var(--tint-json);
+}
+
+/* The group picker is the same control as the group input, as a select. */
+select.group-input { height: 36px; cursor: pointer; }
+.chunk-stats { margin: 12px 0; }
+.btn-chunk { --btn-tint: var(--accent); }
+.btn-primary.btn-chunk.is-loading[disabled] {
+  background: color-mix(in srgb, var(--accent) 62%, #fff);
+  color: #fff;
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+#chunk-result .check-result { margin-bottom: 0; }
+
+/* The per-document report under the summary: one row per document, its
+   warnings indented beneath it; skipped documents in a second, quieter list. */
+.chunk-report { margin: 12px 0 0; padding: 0; list-style: none; }
+.chunk-report-row { padding: 8px 0; border-top: 1px solid var(--line); }
+.chunk-report-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.chunk-report-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.chunk-report.is-skipped .chunk-report-name { color: var(--ink-soft); font-weight: 500; }
+.chunk-report-reason { color: var(--ink-soft); font-size: 12px; }
+.chunk-warnings {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--tint-json);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.chunk-warnings li { word-break: break-word; }

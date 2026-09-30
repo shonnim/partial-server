@@ -1,0 +1,40 @@
+{#
+  Document rows for one folder, plus the "load more" button when the folder
+  holds more than a page of them.
+
+  Each row shows the group id the document carries — what decides whether the
+  picked strategy applies to it — and how many chunks are stored. The chunk
+  count opens the chunks themselves. chunking.js rewrites the count in place
+  after a run, so the tree reflects it without a reload.
+#}
+{% for file in level.files %}
+  <li class="tree-node is-file" data-id="{{ file.id }}">
+    <div class="tree-row">
+      <input type="checkbox" class="tree-check" data-kind="file"
+             value="{{ file.id }}" aria-label="Select {{ file.filename }}">
+      <span class="tree-icon">📄</span>
+      <span class="tree-name" title="{{ file.filename }}">{{ file.filename }}</span>
+      <span class="tree-badges">
+        <span class="group-cell">{% if file.group_id %}<span class="pill group" title="group id">🏷 {{ file.group_id }}</span>{% endif %}</span>
+        <span class="content-count" data-count="{{ file.content_count }}">{% if file.content_count %}<a class="pill contents" data-viewer title="the blocks stored for this document" href="{{ url_for('sections_contents', document_id=file.id) }}">{{ file.content_count }} block{{ '' if file.content_count == 1 else 's' }}</a>{% endif %}</span>
+        {#- Empty means "not chunked yet"; `.chunk-count:empty` collapses it. -#}
+        <span class="chunk-count" data-count="{{ file.chunk_count }}"
+              data-chunks-url="{{ url_for('chunking_chunks', document_id=file.id) }}">{% if file.chunk_count %}<a class="pill chunks" data-viewer title="the chunks stored for this document" href="{{ url_for('chunking_chunks', document_id=file.id) }}">{{ file.chunk_count }} chunk{{ '' if file.chunk_count == 1 else 's' }}</a>{% endif %}</span>
+        <span class="pill total">{{ file.pages if file.pages is not none else '—' }} p</span>
+        <a class="btn tree-view btn-pdf" data-viewer
+           href="{{ url_for('document_viewer', document_id=file.id) }}">PDF</a>
+      </span>
+    </div>
+  </li>
+{% endfor %}
+
+{% if level.remaining_files %}
+  <li class="tree-more">
+    <button type="button" class="btn"
+            hx-get="{{ url_for('chunking_nodes') }}?path={{ level.path|urlencode }}&offset={{ level.next_offset }}"
+            hx-target="closest .tree-more"
+            hx-swap="outerHTML">
+      ↓ Load {{ level.remaining_files }} more
+    </button>
+  </li>
+{% endif %}

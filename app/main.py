@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.routers import (
+    chunking,
     dashboard,
     documents,
     grouping,
@@ -19,6 +20,7 @@ app = FastAPI(title="partial-server")
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+app.include_router(chunking.router)
 app.include_router(dashboard.router)
 app.include_router(documents.router)
 app.include_router(grouping.router)

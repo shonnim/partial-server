@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Chunking · partial-server{% endblock %}
+{% block heading %}🧩 Chunking{% endblock %}
+{% block subheading %}Tick documents, pick their group id on the right, and cut each one's stored blocks into chunks with that group's strategy.{% endblock %}
+
+{% block actions %}
+  <span id="tree-selection" class="toolbar-count">Nothing selected</span>
+{% endblock %}
+
+{% block content %}
+  <div class="parsing-layout">
+    <div class="parsing-main">
+      <div class="card tree-card">
+        <div class="tree-head">
+          <span class="tree-head-label">📚 Corpus</span>
+          <span class="tree-badges" id="tree-root-badges" data-total="{{ total }}">
+            {% if failed %}<span class="pill fail">✗ {{ "{:,}".format(failed) }}</span>{% endif %}
+            <span class="pill total">{{ "{:,}".format(total) }}</span>
+            <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
+          </span>
+        </div>
+
+        <ul class="tree tree-children" id="tree-root">
+          {% include "chunking/_partials/level.html" %}
+        </ul>
+      </div>
+    </div>
+
+    {#- The group picker sits beside the tree. The button posts the ticked
+        selection and the chosen group; chunking.js keeps it disabled until
+        both are there. -#}
+    <aside class="side-panel">
+      <section class="card side-box" id="chunk-box">
+        <div class="side-box-head">
+          <span class="side-box-title">🧩 Chunking</span>
+        </div>
+        <form id="chunk-form"
+              hx-post="{{ url_for('chunking_run') }}"
+              hx-vals="js:{selection: window.treeSelectionJSON()}"
+              hx-target="#chunk-result"
+              hx-swap="innerHTML"
+              hx-indicator="#chunk-spinner">
+          <label class="group-label" for="chunk-group">Group id</label>
+          <select class="group-input" id="chunk-group" name="group_id">
+            <option value="">— pick a group —</option>
+            {% for name in group_ids %}
+              <option value="{{ name }}"{% if name not in implemented %} data-unimplemented="1"{% endif %}>
+                {{ name }}{% if name not in implemented %} (no strategy yet){% endif %}
+              </option>
+            {% endfor %}
+          </select>
+
+          <dl class="stat-grid chunk-stats">
+            <div class="stat-cell" data-stat="selected"><dt>Selected documents</dt><dd id="chunk-selected">0</dd></div>
+          </dl>
+
+          <div class="side-box-actions group-actions">
+            <button type="submit" class="btn btn-primary btn-chunk" id="btn-chunk"
+                    data-label="🧩 Chunking" disabled>
+              🧩 Chunking
+            </button>
+            <span class="spinner" id="chunk-spinner"></span>
+          </div>
+        </form>
+        <p class="side-note">
+          Only documents carrying the picked group id are chunked; the rest are
+          reported as skipped · a re-run replaces a document's chunks · at most
+          <strong>{{ "{:,}".format(max_batch) }}</strong> per click.
+        </p>
+      </section>
+
+      {#- Where the button's reply lands. Empty until the first click. -#}
+      <div id="chunk-result"></div>
+    </aside>
+  </div>
+
+  {#- The viewer pop-up, same as on the documents list. -#}
+  <div id="modal"></div>
+
+  <script src="{{ static_url('js/viewer-modal.js') }}" defer></script>
+  <script src="{{ static_url('js/tree.js') }}" defer></script>
+  <script src="{{ static_url('js/chunking.js') }}" defer></script>
+{% endblock %}

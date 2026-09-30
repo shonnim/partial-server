@@ -53,6 +53,9 @@ class FolderNode:
     # Documents beneath this folder that already carry a group id. The
     # Grouping page shows it so a half-labelled folder stands out.
     with_group: int = 0
+    # Documents beneath this folder that already have chunks stored, which
+    # the Chunking page shows the same way.
+    with_chunks: int = 0
 
     @property
     def all_stored(self) -> bool:
@@ -93,6 +96,8 @@ class FileNode:
     content_count: int = 0
     # The label assigned on the Grouping page, or None when never grouped.
     group_id: str | None = None
+    # How many chunks a Chunking run has stored for this document.
+    chunk_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -143,6 +148,9 @@ def child_folders(db: Session, path: str) -> list[FolderNode]:
                            SELECT 1 FROM header_contents hc
                            WHERE hc.doc_id = documents.id
                        ) AS sectioned,
+                       EXISTS (
+                           SELECT 1 FROM chunks c WHERE c.doc_id = documents.id
+                       ) AS chunked,
                        (
                            SELECT p.backend FROM parsed_docs p
                            WHERE p.doc_id = documents.id
@@ -158,7 +166,8 @@ def child_folders(db: Session, path: str) -> list[FolderNode]:
                    count(*) FILTER (WHERE stored) AS with_headers,
                    count(*) FILTER (WHERE latest_backend = :vlm_backend) AS with_vlm,
                    count(*) FILTER (WHERE sectioned) AS with_contents,
-                   count(*) FILTER (WHERE group_id IS NOT NULL) AS with_group
+                   count(*) FILTER (WHERE group_id IS NOT NULL) AS with_group,
+                   count(*) FILTER (WHERE chunked) AS with_chunks
             FROM scoped
             WHERE folder IS NOT NULL
               AND split_part(folder, '/', :child_depth) <> ''
@@ -178,6 +187,7 @@ def child_folders(db: Session, path: str) -> list[FolderNode]:
             with_vlm=r.with_vlm,
             with_contents=r.with_contents,
             with_group=r.with_group,
+            with_chunks=r.with_chunks,
         )
         for r in rows
     ]
@@ -217,6 +227,9 @@ def folder_files(
                        SELECT count(*) FROM header_contents hc
                        WHERE hc.doc_id = documents.id
                    ) AS content_count,
+                   (
+                       SELECT count(*) FROM chunks c WHERE c.doc_id = documents.id
+                   ) AS chunk_count,
                    latest.backend AS parse_backend,
                    latest.status AS parse_status
             FROM documents
@@ -248,6 +261,7 @@ def folder_files(
             parse_status=DocumentStatus(r.parse_status) if r.parse_status else None,
             content_count=r.content_count,
             group_id=r.group_id,
+            chunk_count=r.chunk_count,
         )
         for r in rows
     ]

@@ -6,6 +6,7 @@ from sqlalchemy import (
     FetchedValue,
     ForeignKey,
     Integer,
+    String,
     Text,
     UniqueConstraint,
     func,
@@ -28,7 +29,18 @@ class Chunk(Base):
         ForeignKey("documents.id", ondelete="CASCADE"),
         nullable=False,
     )
+    # The strategy that made the chunk: the group id the document carried at
+    # the time. A regrouped document's old chunks are told apart by this.
+    group_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    # The final text, breadcrumb included — what the embedder is handed.
     emb_text: Mapped[str] = mapped_column(Text, nullable=False)
+    # text | table | image | chart
+    chunk_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="text"
+    )
+    # The breadcrumb the chunk opens with, kept apart for filtering.
+    section_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     # Position within the document, counted from 1 for each doc_id. Left unset
     # on insert, the chunks_assign_order trigger fills in the document's next
     # number. "order" is a reserved word in SQL; SQLAlchemy quotes it on emit.

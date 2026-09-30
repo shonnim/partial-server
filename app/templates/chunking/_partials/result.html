@@ -1,0 +1,68 @@
+{#
+  The outcome of a Chunking click: how many documents went through, how many
+  were skipped and why, and the chunk count and warnings per document.
+
+  The data attributes on each processed row are what chunking.js reads to
+  repaint the chunk count on the tree rows it can see.
+
+  Errors come back as this card too: the caller is a button on the page, and
+  a 4xx would leave the panel blank.
+#}
+{% if error %}
+  <div class="card check-result is-error">{{ error }}</div>
+{% else %}
+  <div class="card check-result" data-chunk-run data-group-id="{{ result.group_id }}">
+    <div class="check-summary">
+      <span class="pill ok">✓ {{ result.processed|length }} document{{ '' if result.processed|length == 1 else 's' }}</span>
+      <span class="pill chunks">🧩 {{ "{:,}".format(result.total_chunks) }} chunk{{ '' if result.total_chunks == 1 else 's' }}</span>
+      <span class="pill group">🏷 {{ result.group_id }}</span>
+      {% if result.skipped %}
+        <span class="pill total" title="not chunked — see below">↷ {{ result.skipped|length }} skipped</span>
+      {% endif %}
+      {% if result.total_warnings %}
+        <span class="pill warn" title="see the notes under each document">⚠ {{ result.total_warnings }} warning{{ '' if result.total_warnings == 1 else 's' }}</span>
+      {% endif %}
+    </div>
+
+    {% if result.processed %}
+      <ul class="chunk-report">
+        {% for doc in result.processed %}
+          <li class="chunk-report-row" data-chunked
+              data-doc-id="{{ doc.doc_id }}" data-chunks="{{ doc.chunks }}">
+            <div class="chunk-report-head">
+              <span class="chunk-report-name" title="{{ doc.filename }}">{{ doc.filename }}</span>
+              <span class="pill chunks">{{ doc.chunks }} chunk{{ '' if doc.chunks == 1 else 's' }}</span>
+              {% if doc.needs_split %}
+                <span class="pill warn" title="tables over the table budget, saved whole">{{ doc.needs_split }} needs split</span>
+              {% endif %}
+            </div>
+            {% if doc.warnings %}
+              <ul class="chunk-warnings">
+                {% for warning in doc.warnings %}
+                  <li>{{ warning }}</li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {% if result.skipped %}
+      <ul class="chunk-report is-skipped">
+        {% for doc in result.skipped %}
+          <li class="chunk-report-row">
+            <div class="chunk-report-head">
+              <span class="chunk-report-name" title="{{ doc.filename or doc.doc_id }}">{{ doc.filename or doc.doc_id }}</span>
+              <span class="chunk-report-reason">↷ {{ doc.reason }}</span>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {% if not result.processed and not result.skipped %}
+      <p class="check-note">Nothing matched the selection any more. Reload the page.</p>
+    {% endif %}
+  </div>
+{% endif %}
