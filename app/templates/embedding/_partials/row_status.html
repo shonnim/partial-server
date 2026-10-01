@@ -1,0 +1,31 @@
+{#
+  The status cell of one queue row after an embedding run on it.
+
+  data-embedded / data-failed / data-total / data-embedded-total are what
+  embedding.js reads to write the run log line and repaint the tree badge
+  without a reload.
+#}
+{% if result.ok %}
+  {%- set parts = [] -%}
+  {%- if result.unchanged %}{% set _ = parts.append(result.unchanged ~ ' unchanged') %}{% endif -%}
+  {%- if result.skipped %}{% set _ = parts.append(result.skipped ~ ' skipped') %}{% endif -%}
+  {%- if result.prompt_tokens %}{% set _ = parts.append("{:,}".format(result.prompt_tokens) ~ ' tokens') %}{% endif -%}
+  <span class="pill {{ 'fail' if result.failed else 'ok' }}"
+        data-embed-result data-doc-id="{{ result.id }}"
+        data-embedded="{{ result.embedded }}"
+        data-failed="{{ result.failed }}"
+        data-skipped="{{ result.skipped }}"
+        data-unchanged="{{ result.unchanged }}"
+        data-tokens="{{ result.prompt_tokens }}"
+        data-total="{{ result.total_chunks }}"
+        data-embedded-total="{{ result.embedded_total }}"
+        data-done="{{ '1' if result.done else '' }}"
+        data-summary="{{ parts|join(' · ') }}"
+        data-seconds="{{ '%.1f'|format(result.seconds) }}">
+    {{ '✗' if result.failed else '✓' }} {{ result.embedded }} embedded{{ ' · ' ~ result.failed ~ ' failed' if result.failed }}
+  </span>
+{% else %}
+  <span class="pill fail" data-error="{{ result.error }}"
+        data-seconds="{{ '%.1f'|format(result.seconds) }}">✗ failed</span>
+  <span class="gate-reason" title="{{ result.error }}">{{ result.error }}</span>
+{% endif %}

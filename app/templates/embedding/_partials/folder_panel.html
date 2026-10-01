@@ -1,0 +1,49 @@
+{#
+  The center panel for one folder: each document beneath it with its
+  embedding standing. Running the folder goes through the tree — tick it and
+  press Embed — so this panel only has to say where things stand.
+#}
+<div class="card embed-doc-panel">
+  <div class="side-box-head">
+    <span class="side-box-title">📂 {{ panel.path or "Corpus root" }}</span>
+    <span class="tree-badges">
+      <span class="pill total">{{ panel.total_docs }} document{{ '' if panel.total_docs == 1 else 's' }}</span>
+      <span class="pill chunks">🧩 {{ panel.with_chunks }} with chunks</span>
+    </span>
+  </div>
+
+  <p class="side-note">
+    To embed this folder, tick it in the tree and press <strong>Embed</strong> —
+    the run walks its documents one at a time, into the log on the right.
+  </p>
+
+  {% if panel.docs %}
+    <table class="embed-table">
+      <thead>
+        <tr><th>document</th><th class="is-num">chunks</th><th>embedded</th><th class="is-num">failed</th></tr>
+      </thead>
+      <tbody>
+        {% for row in panel.docs %}
+          <tr class="embed-row"
+              hx-get="{{ url_for('embedding_panel', document_id=row.id) }}"
+              hx-target="#embed-panel" hx-swap="innerHTML">
+            <td class="embed-preview" title="open this document's chunks">{{ row.filename }}</td>
+            <td class="is-num">{{ row.stats.total or '—' }}</td>
+            <td>
+              {% if row.stats.total %}
+                <span class="pill {{ 'fail' if row.stats.failed else ('ok' if row.stats.done else 'total') }}">
+                  {{ row.stats.embedded }}/{{ row.stats.total }}
+                </span>
+              {% else %}
+                <span class="pill total">no chunks</span>
+              {% endif %}
+            </td>
+            <td class="is-num">{{ row.stats.failed or '' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="check-note">No documents directly or beneath this folder.</p>
+  {% endif %}
+</div>

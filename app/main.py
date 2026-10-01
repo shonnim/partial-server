@@ -7,6 +7,7 @@ from app.routers import (
     chunking,
     dashboard,
     documents,
+    embedding,
     grouping,
     headers,
     parsed_docs,
@@ -23,6 +24,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.include_router(chunking.router)
 app.include_router(dashboard.router)
 app.include_router(documents.router)
+app.include_router(embedding.router)
 app.include_router(grouping.router)
 app.include_router(headers.router)
 app.include_router(parsed_docs.router)

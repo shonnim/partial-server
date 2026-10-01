@@ -1,0 +1,52 @@
+{#
+  Document rows for one folder, plus the "load more" button when the folder
+  holds more than a page of them.
+
+  Clicking the name opens the document's chunk table in the center panel.
+  The embed badge is the document's standing — embedded / total chunks,
+  green when complete, red when anything failed — and embedding.js repaints
+  it in place after a run, so the tree reflects a run without a reload.
+#}
+{% for file in level.files %}
+  {% set es = estats.get(file.id) %}
+  <li class="tree-node is-file" data-id="{{ file.id }}">
+    <div class="tree-row">
+      {#- A fully embedded document is out of the selection: ticking it again
+          would be a no-op, and the panel's Re-embed all covers a redo. -#}
+      <input type="checkbox" class="tree-check" data-kind="file"
+             value="{{ file.id }}" aria-label="Select {{ file.filename }}"
+             {% if es and es.done %}disabled title="already embedded"{% endif %}>
+      <span class="tree-icon">📄</span>
+      <button type="button" class="tree-name tree-name-open" title="{{ file.filename }}"
+              hx-get="{{ url_for('embedding_panel', document_id=file.id) }}"
+              hx-target="#embed-panel"
+              hx-swap="innerHTML">{{ file.filename }}</button>
+      <span class="tree-badges">
+        <span class="embed-count" data-doc-id="{{ file.id }}"
+              data-total="{{ es.total if es else 0 }}">
+          {%- if es and es.total -%}
+            <span class="pill {{ 'fail' if es.failed else ('ok' if es.done else 'total') }}"
+                  title="embedded / total chunks{{ ' · ' ~ es.failed ~ ' failed' if es.failed }}">
+              🧲 {{ es.embedded }}/{{ es.total }}
+            </span>
+          {%- endif -%}
+        </span>
+        {% if file.chunk_count %}
+          <span class="pill chunks" title="chunks stored">🧩 {{ file.chunk_count }}</span>
+        {% endif %}
+        <span class="pill total">{{ file.pages if file.pages is not none else '—' }} p</span>
+      </span>
+    </div>
+  </li>
+{% endfor %}
+
+{% if level.remaining_files %}
+  <li class="tree-more">
+    <button type="button" class="btn"
+            hx-get="{{ url_for('embedding_nodes') }}?path={{ level.path|urlencode }}&offset={{ level.next_offset }}"
+            hx-target="closest .tree-more"
+            hx-swap="outerHTML">
+      ↓ Load {{ level.remaining_files }} more
+    </button>
+  </li>
+{% endif %}

@@ -1,0 +1,92 @@
+{#
+  The center panel for one document: its chunks as a table, the filter and
+  search above it, and the document-wide actions. Swapped whole into
+  #embed-panel; the data attributes on the root are what embedding.js reads
+  to repaint the document's tree badge after an action here.
+#}
+{% set stats = panel.stats %}
+<div class="card embed-doc-panel" data-panel-doc="{{ panel.doc.id }}"
+     data-total="{{ stats.total }}" data-embedded-total="{{ stats.embedded }}"
+     data-failed="{{ stats.failed }}" data-done="{{ '1' if stats.done else '' }}">
+  <div class="side-box-head">
+    <span class="side-box-title" title="{{ panel.doc.filename }}">📄 {{ panel.doc.filename }}</span>
+    <span class="tree-badges">
+      <span class="pill {{ 'fail' if stats.failed else ('ok' if stats.done else 'total') }}">
+        🧲 {{ stats.embedded }}/{{ stats.total }}
+      </span>
+      {% if stats.failed %}<span class="pill fail">✗ {{ stats.failed }} failed</span>{% endif %}
+      {% if panel.outdated %}<span class="pill warn" title="text changed since embedding">⟳ {{ panel.outdated }} outdated</span>{% endif %}
+      {% if stats.skipped %}<span class="pill total">↷ {{ stats.skipped }} skipped</span>{% endif %}
+    </span>
+  </div>
+
+  {% if panel_error %}<p class="side-error">{{ panel_error }}</p>{% endif %}
+
+  <div class="embed-doc-toolbar">
+    <form class="embed-filter"
+          hx-get="{{ url_for('embedding_panel', document_id=panel.doc.id) }}"
+          hx-target="#embed-panel" hx-swap="innerHTML"
+          hx-trigger="change from:find select, submit">
+      <select name="status" class="group-input">
+        <option value="">all statuses</option>
+        {% for name in ("pending", "embedded", "outdated", "failed", "skipped", "processing") %}
+          <option value="{{ name }}" {{ 'selected' if panel.status_filter == name }}>{{ name }}</option>
+        {% endfor %}
+      </select>
+      <input type="search" name="q" class="group-input" placeholder="search chunk text…"
+             value="{{ panel.query }}">
+      <button type="submit" class="btn">Filter</button>
+    </form>
+
+    <span class="toolbar-spacer"></span>
+
+    <form class="embed-doc-actions"
+          hx-post="{{ url_for('embedding_run_one', document_id=panel.doc.id) }}"
+          hx-vals='{"render": "panel"}'
+          hx-target="#embed-panel" hx-swap="innerHTML"
+          hx-indicator="#panel-spinner">
+      <button type="submit" class="btn btn-primary"
+              title="Embed this document's pending, failed and outdated chunks">
+        🧲 Embed pending
+      </button>
+    </form>
+    <form hx-post="{{ url_for('embedding_run_one', document_id=panel.doc.id) }}"
+          hx-vals='{"render": "panel", "force": "1"}'
+          hx-target="#embed-panel" hx-swap="innerHTML"
+          hx-indicator="#panel-spinner"
+          hx-confirm="Re-embed every chunk of this document, current ones included?">
+      <button type="submit" class="btn">⟳ Re-embed all</button>
+    </form>
+    <form hx-post="{{ url_for('embedding_delete_vectors', document_id=panel.doc.id) }}"
+          hx-target="#embed-panel" hx-swap="innerHTML"
+          hx-indicator="#panel-spinner"
+          hx-confirm="Delete this document's vectors from Qdrant and reset every chunk to pending?">
+      <button type="submit" class="btn btn-danger">🗑 Delete vectors</button>
+    </form>
+    <span class="spinner" id="panel-spinner"></span>
+  </div>
+
+  {% if panel.chunks %}
+    <table class="embed-table">
+      <thead>
+        <tr>
+          <th>#</th><th>id</th><th>text</th><th class="is-num">tok</th>
+          <th>status</th><th>embedded</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in panel.chunks %}
+          {% include "embedding/_partials/chunk_row.html" %}
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="side-note">
+      {{ panel.shown }} of {{ stats.total }} chunk{{ '' if stats.total == 1 else 's' }} shown ·
+      click a row for its vector details on the right.
+    </p>
+  {% elif stats.total %}
+    <p class="check-note">No chunk matches the filter.</p>
+  {% else %}
+    <p class="check-note">No chunks stored for this document yet. Run Chunking on it first.</p>
+  {% endif %}
+</div>

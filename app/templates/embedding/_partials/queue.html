@@ -1,0 +1,47 @@
+{#
+  The outcome of an "Embed" click: a slim strip — how many documents the run
+  takes, how many it leaves, what it is doing now, and Stop. It sits under
+  the run log in the right-hand column; everything per document goes into
+  the log, not here.
+
+  The work queue itself is rendered hidden: embedding.js posts each row's
+  data-run-url in turn (with the card's force flag) and swaps the reply into
+  its status cell, then reads the reply's data attributes into the log.
+
+  Errors come back as this card too: the caller is a button on the page, and
+  a 4xx would leave the panel blank.
+#}
+{% if error %}
+  <div class="card check-result is-error">{{ error }}</div>
+{% else %}
+  <div class="card check-result" data-run="embedding" data-force="{{ '1' if force else '' }}">
+    <div class="run-strip" data-run-strip>
+      <span class="pill ok">✓ {{ queue.eligible|length }} to embed</span>
+      {% if force %}<span class="pill warn" title="every chunk is re-embedded">force</span>{% endif %}
+      {% if queue.skipped %}
+        <span class="pill total" title="no chunks stored — see the run log">↷ {{ queue.skipped|length }} skipped</span>
+      {% endif %}
+      {% if queue.eligible %}
+        <span class="pill total" data-run-state>⏳ starting</span>
+        <span class="toolbar-spacer"></span>
+        <button type="button" class="btn ghost" data-run-stop>■ Stop</button>
+      {% else %}
+        <span class="check-note">Nothing in this selection can be embedded.</span>
+      {% endif %}
+    </div>
+
+    <ul class="gate-queue" hidden>
+      {% for candidate in queue.eligible %}
+        <li class="gate-row" data-doc-id="{{ candidate.id }}"
+            data-name="{{ candidate.filename }}"
+            data-chunks="{{ candidate.chunks }}"
+            data-run-url="{{ url_for('embedding_run_one', document_id=candidate.id) }}">
+          <span class="gate-status"></span>
+        </li>
+      {% endfor %}
+      {% for candidate in queue.skipped %}
+        <li class="gate-skipped" data-name="{{ candidate.filename }}" data-reason="{{ candidate.reason }}"></li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endif %}

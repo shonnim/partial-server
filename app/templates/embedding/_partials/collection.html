@@ -1,0 +1,38 @@
+{#
+  The right-hand box at rest: the Qdrant collection, or why it cannot be
+  read. A clicked chunk replaces this with its detail and offers the way
+  back.
+#}
+<section class="card side-box">
+  <div class="side-box-head">
+    <span class="side-box-title">🗄 Collection</span>
+    <span class="tree-badges">
+      {% if overview.healthy %}
+        <span class="pill ok" title="Qdrant answered">● connected</span>
+      {% else %}
+        <span class="pill fail" title="Qdrant did not answer">● down</span>
+      {% endif %}
+      <button type="button" class="btn ghost"
+              hx-get="{{ url_for('embedding_collection') }}"
+              hx-target="#embed-detail" hx-swap="innerHTML">⟳</button>
+    </span>
+  </div>
+
+  {% if overview.error %}
+    <p class="side-error">{{ overview.error }}</p>
+  {% elif overview.info %}
+    <dl class="stat-grid">
+      <div class="stat-cell"><dt>Name</dt><dd>{{ overview.info.name }}</dd></div>
+      <div class="stat-cell"><dt>Points</dt><dd>{{ "{:,}".format(overview.info.points) }}</dd></div>
+      <div class="stat-cell"><dt>Vector size</dt><dd>{{ overview.info.vector_size }}</dd></div>
+      <div class="stat-cell"><dt>Distance</dt><dd>{{ overview.info.distance }}</dd></div>
+      <div class="stat-cell"><dt>Status</dt><dd>{{ overview.info.status }}</dd></div>
+    </dl>
+  {% else %}
+    <p class="side-note">
+      No collection yet. It is created from the first embedding, sized to
+      what the model returns.
+    </p>
+  {% endif %}
+  <p class="side-note">Click a chunk row for its stored vector.</p>
+</section>

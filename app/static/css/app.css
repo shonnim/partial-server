@@ -1476,3 +1476,92 @@ select.group-input { height: 36px; cursor: pointer; }
   line-height: 1.5;
 }
 .chunk-warnings li { word-break: break-word; }
+
+/* ---- Embedding page ---------------------------------------------------------
+   The same two-column frame as Chunking; the chunk panel a click opens sits
+   under the tree, and everything else lives in the right-hand column. */
+.embed-force { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+#embed-panel { margin-top: 18px; }
+
+/* A file name that opens the panel reads as a link, not a label. */
+button.tree-name-open {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+button.tree-name-open:hover { color: var(--accent); text-decoration: underline; }
+.embed-count:empty { display: none; }
+
+/* The document panel: filter strip, then the chunk table. */
+.embed-doc-panel { padding: 14px 16px; }
+.embed-doc-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 12px;
+}
+.embed-filter { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.embed-filter .group-input { width: auto; min-width: 120px; }
+.embed-doc-actions { display: inline-flex; }
+
+.btn-danger {
+  border-color: color-mix(in srgb, var(--fail) 45%, #fff);
+  color: var(--fail);
+}
+.btn-danger:hover { background: var(--fail-soft); }
+
+.embed-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.embed-table th {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 2px solid var(--line);
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  letter-spacing: .3px;
+  text-transform: uppercase;
+}
+.embed-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.embed-table .is-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.embed-row { cursor: pointer; }
+.embed-row:hover td { background: color-mix(in srgb, var(--accent) 6%, #fff); }
+.embed-preview {
+  max-width: 0;
+  width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.embed-when { white-space: nowrap; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+
+/* The chunk detail box on the right. */
+.embed-detail-grid dd { word-break: break-word; }
+.embed-detail-wrap { font-size: 11px; }
+.embed-detail-ids { word-break: break-all; }
+.embed-vector,
+.embed-chunk-text {
+  margin: 4px 0 10px;
+  padding: 8px 10px;
+  background: #f6f7fc;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.embed-chunk-text { max-height: 300px; overflow: auto; }
+#embed-result .check-result { margin-bottom: 0; }

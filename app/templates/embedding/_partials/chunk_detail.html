@@ -1,0 +1,48 @@
+{#
+  The right-hand box while a chunk is selected: the row's facts, what Qdrant
+  holds for it, and the full text. The button at the top goes back to the
+  collection info that normally sits here.
+#}
+{% set chunk = detail.chunk %}
+<section class="card side-box">
+  <div class="side-box-head">
+    <span class="side-box-title">🔍 Chunk {{ chunk.id }}</span>
+    <button type="button" class="btn ghost"
+            hx-get="{{ url_for('embedding_collection') }}"
+            hx-target="#embed-detail" hx-swap="innerHTML">← collection</button>
+  </div>
+
+  <dl class="stat-grid embed-detail-grid">
+    <div class="stat-cell"><dt>Status</dt><dd>
+      <span class="pill {{ 'ok' if detail.status == 'embedded' else ('fail' if detail.status == 'failed' else ('warn' if detail.status == 'outdated' else 'total')) }}">{{ detail.status }}</span>
+    </dd></div>
+    <div class="stat-cell"><dt>Tokens</dt><dd>{{ chunk.prompt_tokens if chunk.prompt_tokens is not none else '—' }}</dd></div>
+    <div class="stat-cell"><dt>Model</dt><dd class="embed-detail-wrap">{{ chunk.embedding_model or '—' }}</dd></div>
+    <div class="stat-cell"><dt>Embedded at</dt><dd>{{ chunk.embedded_at.strftime('%Y-%m-%d %H:%M') if chunk.embedded_at else '—' }}</dd></div>
+    <div class="stat-cell"><dt>Point id</dt><dd>{{ detail.point.chunk_id if detail.point else '—' }}</dd></div>
+    <div class="stat-cell"><dt>Dimension</dt><dd>{{ detail.point.dimension if detail.point else '—' }}</dd></div>
+  </dl>
+
+  <p class="side-note embed-detail-ids">
+    doc {{ chunk.doc_id }} · chunk {{ chunk.id }} · order {{ chunk.order }} · {{ chunk.chunk_type }}
+  </p>
+
+  {% if chunk.embedding_error %}
+    <p class="side-error">{{ chunk.embedding_error }}</p>
+  {% endif %}
+  {% if detail.store_error %}
+    <p class="side-error">{{ detail.store_error }}</p>
+  {% elif not detail.point %}
+    <p class="side-note">No point in Qdrant for this chunk.</p>
+  {% endif %}
+
+  {% if detail.point and detail.point.head %}
+    <p class="side-note">First {{ detail.point.head|length }} vector values</p>
+    {#- Values are shown as the API returned them: a tiny float like
+        -3.5e-38 is a valid component, not noise to round away. -#}
+    <pre class="embed-vector">{{ detail.point.head|join(', ') }}</pre>
+  {% endif %}
+
+  <p class="side-note">Chunk text ({{ chunk.token_count }} tokens)</p>
+  <pre class="embed-chunk-text">{{ chunk.emb_text }}</pre>
+</section>

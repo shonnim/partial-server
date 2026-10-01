@@ -1,0 +1,54 @@
+{#
+  One level of the embedding tree: subfolders first, then the documents
+  sitting directly in this folder. Rendered into the parent's
+  <ul class="tree-children">, so it emits list items only.
+
+  fstats maps a subfolder's name to how many of its documents are fully
+  embedded and how many have failures; estats does the same per document
+  (see files.html). The 📋 button opens the folder's summary in the center
+  panel; ticking the box queues it for the Embed button.
+#}
+{% for folder in level.folders %}
+  <li class="tree-node" data-path="{{ folder.path }}" data-total="{{ folder.total }}">
+    <div class="tree-row">
+      <input type="checkbox" class="tree-check" data-kind="folder"
+             aria-label="Select folder {{ folder.name }}">
+      <button type="button" class="tree-label" aria-expanded="false"
+              hx-get="{{ url_for('embedding_nodes') }}?path={{ folder.path|urlencode }}"
+              hx-target="next .tree-children"
+              hx-swap="innerHTML"
+              hx-trigger="click once">
+        <span class="tree-icon">
+          <span class="icon-closed">📁</span><span class="icon-open">📂</span>
+        </span>
+        <span class="tree-name" title="{{ folder.path }}">{{ folder.name }}</span>
+      </button>
+      <span class="tree-badges">
+        {% set fs = fstats.get(folder.name) %}
+        {% if fs and fs.done %}
+          <span class="pill ok" title="{{ fs.done }} of {{ folder.total }} fully embedded">🧲 {{ fs.done }}</span>
+        {% endif %}
+        {% if fs and fs.failed %}
+          <span class="pill fail" title="documents with failed chunks">✗ {{ fs.failed }}</span>
+        {% endif %}
+        {% if folder.with_chunks %}
+          <span class="pill chunks" title="{{ folder.with_chunks }} of {{ folder.total }} chunked">🧩 {{ folder.with_chunks }}</span>
+        {% endif %}
+        <span class="pill total">{{ folder.total }}</span>
+        <button type="button" class="btn tree-view" title="Folder summary in the panel"
+                hx-get="{{ url_for('embedding_folder') }}?path={{ folder.path|urlencode }}"
+                hx-target="#embed-panel"
+                hx-swap="innerHTML">📋</button>
+        {#- Filled in by tree.js as boxes are ticked; hidden while nothing is. -#}
+        <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
+      </span>
+    </div>
+    <ul class="tree-children" hidden></ul>
+  </li>
+{% endfor %}
+
+{% include "embedding/_partials/files.html" %}
+
+{% if level.is_empty %}
+  <li class="tree-empty">Empty folder</li>
+{% endif %}

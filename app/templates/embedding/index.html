@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block title %}Embedding · partial-server{% endblock %}
+{% block heading %}🧲 Embedding{% endblock %}
+{% block subheading %}Pick documents, embed their chunks with Upstage, and keep the vectors in Qdrant.{% endblock %}
+
+{% block actions %}
+  <span id="tree-selection" class="toolbar-count">Nothing selected</span>
+{% endblock %}
+
+{% block content %}
+  {#- The same two-column frame as Chunking: the tree on the left, the
+      action box and the run log on the right. A clicked document's chunk
+      table opens under the tree. -#}
+  <div class="parsing-layout">
+    <div class="parsing-main">
+      <div class="card tree-card">
+        <div class="tree-head">
+          <span class="tree-head-label">📚 Corpus</span>
+          <span class="tree-badges" id="tree-root-badges" data-total="{{ total }}">
+            {% if failed %}<span class="pill fail">✗ {{ "{:,}".format(failed) }}</span>{% endif %}
+            <span class="pill total">{{ "{:,}".format(total) }}</span>
+            <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
+          </span>
+        </div>
+
+        <ul class="tree tree-children" id="tree-root">
+          {% include "embedding/_partials/level.html" %}
+        </ul>
+      </div>
+
+      {#- Where a clicked document's chunk table (or a folder's summary)
+          lands, under the tree. -#}
+      <div id="embed-panel">
+        <div class="card side-box">
+          <p class="check-note">
+            Click a document's name to see its chunks here, or a folder's 📋
+            for a summary. Tick boxes and press Embed to run a batch.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    {#- The Embed box sits beside the tree, like the Chunking box: the
+        button posts the ticked selection; embedding.js keeps it disabled
+        until something is there. -#}
+    <aside class="side-panel">
+      <section class="card side-box" id="embed-box">
+        <div class="side-box-head">
+          <span class="side-box-title">🧲 Embedding</span>
+        </div>
+        <form id="embed-form"
+              hx-post="{{ url_for('embedding_run') }}"
+              hx-vals="js:{selection: window.treeSelectionJSON()}"
+              hx-target="#embed-result"
+              hx-swap="innerHTML"
+              hx-indicator="#embed-spinner">
+          <label class="group-label embed-force" for="embed-force"
+                 title="Re-embed every chunk, current ones included">
+            <input type="checkbox" name="force" value="1" id="embed-force"> force re-embed
+          </label>
+
+          <dl class="stat-grid chunk-stats">
+            <div class="stat-cell" data-stat="selected"><dt>Selected documents</dt><dd id="embed-selected">0</dd></div>
+          </dl>
+
+          <div class="side-box-actions group-actions">
+            <button type="submit" class="btn btn-primary btn-chunk" id="btn-embed"
+                    data-label="🧲 Embed" disabled>
+              🧲 Embed
+            </button>
+            <span class="spinner" id="embed-spinner"></span>
+          </div>
+        </form>
+        <p class="side-note">
+          One document at a time · only pending / failed / outdated chunks,
+          unless forced · at most <strong>{{ "{:,}".format(max_batch) }}</strong> per click.
+        </p>
+      </section>
+
+      {#- The collection info at rest; a clicked chunk's detail takes its
+          place, with a button back. -#}
+      <div id="embed-detail"
+           hx-get="{{ url_for('embedding_collection') }}"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+        <section class="card side-box">
+          <div class="side-box-head"><span class="side-box-title">🗄 Collection</span></div>
+          <p class="side-note">Reading Qdrant…</p>
+        </section>
+      </div>
+
+      {#- Filled in by embedding.js as the queue runs. -#}
+      <section class="card side-box" id="embed-log-box">
+        <div class="side-box-head">
+          <span class="side-box-title">📜 Run log</span>
+          <span class="live-badge" id="embed-log-live" hidden>
+            <span class="live-dot"></span> running
+          </span>
+        </div>
+
+        <dl class="stat-grid section-log-stats">
+          <div class="stat-cell" data-stat="elapsed"><dt>Elapsed</dt><dd>0:00</dd></div>
+          <div class="stat-cell" data-stat="progress"><dt>Documents</dt><dd>0 / 0</dd></div>
+          <div class="stat-cell" data-stat="chunks"><dt>Chunks embedded</dt><dd>0</dd></div>
+          <div class="stat-cell" data-stat="tokens"><dt>Tokens</dt><dd>0</dd></div>
+        </dl>
+
+        <div class="side-box-actions section-log-actions">
+          <span class="side-checked" id="embed-log-summary">No run yet.</span>
+          <span class="toolbar-spacer"></span>
+          <button type="button" class="btn ghost" id="embed-log-clear" disabled>Clear</button>
+        </div>
+
+        <ol class="run-log" id="embed-log" aria-live="polite">
+          <li class="run-log-empty">Start an Embed run and each document will be logged here.</li>
+        </ol>
+      </section>
+
+      {#- Where the Embed button's reply lands: the queue strip and the hidden
+          rows embedding.js walks. Empty until the first click. -#}
+      <div id="embed-result"></div>
+    </aside>
+  </div>
+
+  {#- The viewer pop-up, same as on the documents list. -#}
+  <div id="modal"></div>
+
+  <script src="{{ static_url('js/viewer-modal.js') }}" defer></script>
+  <script src="{{ static_url('js/tree.js') }}" defer></script>
+  <script src="{{ static_url('js/embedding.js') }}" defer></script>
+{% endblock %}

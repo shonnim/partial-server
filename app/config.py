@@ -41,6 +41,24 @@ class Settings(BaseSettings):
     vlm_model: str = Field(default="qwen2.5-vl-7b-instruct", alias="VLM_MODEL")
     vlm_timeout_seconds: float = Field(default=180.0, alias="VLM_TIMEOUT_SECONDS")
 
+    # The Upstage embedding API the Embedding page sends chunk text to. The
+    # key stays on the backend: it is never rendered into a template, never
+    # logged, and never sent anywhere but this URL.
+    upstage_api_key: str = Field(default="", alias="UPSTAGE_API_KEY")
+    upstage_embedding_url: str = Field(
+        default="https://api.upstage.ai/v1/embeddings", alias="UPSTAGE_EMBEDDING_URL"
+    )
+    upstage_embedding_model: str = Field(
+        default="solar-embedding-2-passage", alias="UPSTAGE_EMBEDDING_MODEL"
+    )
+    upstage_timeout_seconds: float = Field(default=30.0, alias="UPSTAGE_TIMEOUT_SECONDS")
+
+    # Qdrant holds the chunk vectors. The backend runs on the host, so the
+    # default is localhost; a backend inside the compose network would use
+    # http://qdrant:6333 instead.
+    qdrant_url: str = Field(default="http://localhost:6333", alias="QDRANT_URL")
+    qdrant_collection: str = Field(default="chunks", alias="QDRANT_COLLECTION")
+
     # The document parsing service the Pages method sends a contents page to.
     # One VLM pass over a few pages is slow, so the timeout is generous.
     doc_extract_base_url: str = Field(

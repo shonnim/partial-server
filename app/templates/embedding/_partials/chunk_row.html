@@ -1,0 +1,29 @@
+{#
+  One chunk of the document panel. The row itself loads the chunk's detail
+  into the right-hand box; the button embeds just this chunk and swaps the
+  row for its refreshed self.
+#}
+<tr class="embed-row is-{{ item.status }}" id="chunk-row-{{ item.chunk.id }}"
+    hx-get="{{ url_for('embedding_chunk_detail', chunk_id=item.chunk.id) }}"
+    hx-target="#embed-detail" hx-swap="innerHTML">
+  <td class="is-num">{{ item.chunk.order }}</td>
+  <td class="is-num">{{ item.chunk.id }}</td>
+  <td class="embed-preview" title="open details">{{ item.chunk.emb_text[:160] }}</td>
+  <td class="is-num">{{ item.chunk.token_count }}</td>
+  <td>
+    <span class="pill {{ 'ok' if item.status == 'embedded' else ('fail' if item.status == 'failed' else ('warn' if item.status == 'outdated' else 'total')) }}"
+          {% if item.chunk.embedding_error %}title="{{ item.chunk.embedding_error }}"{% endif %}>
+      {{ item.status }}
+    </span>
+  </td>
+  <td class="embed-when">{{ item.chunk.embedded_at.strftime('%m-%d %H:%M') if item.chunk.embedded_at else '—' }}</td>
+  <td>
+    <button type="button" class="btn"
+            hx-post="{{ url_for('embedding_chunk_embed', chunk_id=item.chunk.id) }}"
+            hx-target="closest tr" hx-swap="outerHTML"
+            hx-disabled-elt="this"
+            title="{{ 'Re-embed this chunk' if item.status == 'embedded' else 'Embed this chunk' }}">
+      {{ '⟳' if item.status == 'embedded' else '🧲' }}
+    </button>
+  </td>
+</tr>

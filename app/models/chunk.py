@@ -57,6 +57,22 @@ class Chunk(Base):
         nullable=False,
         server_default="{}",
     )
+    # Where the chunk stands with the embedder:
+    # pending | processing | embedded | failed | skipped.
+    # A re-chunk replaces the rows, so a fresh chunk is always pending.
+    embedding_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="pending"
+    )
+    # What the embedding was made with and what it cost, for the panel.
+    embedding_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    embedded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    embedding_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # sha256 of emb_text at embedding time: a chunk whose text no longer
+    # hashes to this is outdated and gets re-embedded on the next run.
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
