@@ -285,7 +285,7 @@ def test_heading_printed_as_plain_text_moves_the_path() -> None:
     assert result.warnings == []
 
 
-def test_content_under_a_part_with_no_chapter_is_warned_about() -> None:
+def test_content_between_a_part_and_its_first_chapter_is_chunked_without_a_warning() -> None:
     rows = [
         row(10, "I. 채무의 현명한 관리(Debt : Use it Wisely)", header_id=1),
         row(12, "□ 장 없이 바로 나오는 본문", header_id=1),
@@ -295,8 +295,7 @@ def test_content_under_a_part_with_no_chapter_is_warned_about() -> None:
     assert result.chunks[0].text == (
         "[I. 채무의 현명한 관리(Debt : Use it Wisely)]\n□ 장 없이 바로 나오는 본문"
     )
-    assert len(result.warnings) == 1
-    assert "no chapter" in result.warnings[0]
+    assert result.warnings == []
 
 
 def test_header_without_a_marker_falls_back_to_its_outline_level() -> None:
@@ -472,14 +471,310 @@ def test_table_that_cannot_be_read_is_kept_as_html_with_a_warning() -> None:
     assert any("could not be read" in w for w in result.warnings)
 
 
-def test_oversized_table_is_saved_whole_and_flagged() -> None:
-    cells = "".join(f"<tr><td>row {i}</td><td>{'가' * 40}</td></tr>" for i in range(30))
-    rows = [row(11, "1. 세계 채무 현황"), row(21, f"<table>{cells}</table>", type="table")]
+def table_html(*lines: list[str]) -> str:
+    """A table the way the parser writes one: ``tr`` and ``td`` only."""
+    body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in line) + "</tr>" for line in lines)
+    return f"<table>{body}</table>"
+
+
+def table_lines(text: str) -> list[str]:
+    return [line for line in text.split("\n") if line.startswith("|")]
+
+
+YEARS = ["", "2016", "2017"]
+YEAR_HEADER = ["|  | 2016 | 2017 |", "| --- | --- | --- |"]
+
+
+def test_table_running_onto_the_next_page_is_joined_under_the_first_header() -> None:
+    rows = [
+        row(11, "1. 세계 채무 현황"),
+        row(
+            21,
+            table_html(YEARS, ["Asia", "5.3", "5.3"]),
+            type="table",
+            caption="<표 1> 성장률 전망",
+            page_idx=3,
+        ),
+        # The next page: no header row, no caption, and the table's footnote.
+        row(
+            23,
+            table_html(["Europe", "1.9", "2.0"], ["World", "3.2", "3.5"]),
+            type="table",
+            footnote="자료: IMF",
+            page_idx=4,
+        ),
+    ]
+    result = chunker.chunk(rows, HEADERS)
+
+    assert len(result.chunks) == 1
+    table = result.chunks[0]
+    assert table.text == "\n".join(
+        [
+            BREADCRUMB,
+            "<표 1> 성장률 전망",
+            *YEAR_HEADER,
+            "| Asia | 5.3 | 5.3 |",
+            "| Europe | 1.9 | 2.0 |",
+            "| World | 3.2 | 3.5 |",
+            "자료: IMF",
+        ]
+    )
+    assert table.chunk_type == "table"
+    assert table.head_content_ids == [21, 23]
+
+
+def test_header_printed_again_on_the_next_page_is_not_repeated() -> None:
+    rows = [
+        row(11, "1. 세계 채무 현황"),
+        row(21, table_html(YEARS, ["Asia", "5.3", "5.3"]), type="table", page_idx=3),
+        row(22, table_html(YEARS, ["Europe", "1.9", "2.0"]), type="table", page_idx=4),
+    ]
+    result = chunker.chunk(rows, HEADERS)
+
+    assert table_lines(result.chunks[0].text) == [
+        *YEAR_HEADER,
+        "| Asia | 5.3 | 5.3 |",
+        "| Europe | 1.9 | 2.0 |",
+    ]
+
+
+def test_header_row_cut_off_as_its_own_table_heads_the_rows_that_follow() -> None:
+    # Two-digit years read as numbers, so the lone row is not told as a
+    # header by itself; the body arriving under it is what settles it.
+    rows = [
+        row(11, "1. 세계 채무 현황"),
+        row(21, table_html(["", "09", "10"]), type="table", caption="<표 2> 재정수지"),
+        row(22, table_html(["호주", "-4.6", "-5.1"]), type="table", caption="일반정부 재정수지"),
+        row(23, table_html(["한국", "0.0", "1.5"]), type="table", footnote="자료: IMF"),
+    ]
+    result = chunker.chunk(rows, HEADERS)
+
+    assert len(result.chunks) == 1
+    assert result.chunks[0].text == "\n".join(
+        [
+            BREADCRUMB,
+            "<표 2> 재정수지",
+            "|  | 09 | 10 |",
+            "| --- | --- | --- |",
+            "| 일반정부 재정수지 |  |  |",
+            "| 호주 | -4.6 | -5.1 |",
+            "| 한국 | 0.0 | 1.5 |",
+            "자료: IMF",
+        ]
+    )
+    assert result.chunks[0].head_content_ids == [21, 22, 23]
+
+
+def test_single_data_row_followed_by_more_rows_is_not_taken_for_a_header() -> None:
+    rows = [
+        row(11, "1. 세계 채무 현황"),
+        row(21, table_html(["호주", "-4.6", "-5.1"]), type="table"),
+        row(22, table_html(["한국", "0.0", "1.5"]), type="table"),
+    ]
+    result = chunker.chunk(rows, HEADERS)
+
+    assert table_lines(result.chunks[0].text) == [
+        "|  |  |  |",
+        "| --- | --- | --- |",
+        "| 호주 | -4.6 | -5.1 |",
+        "| 한국 | 0.0 | 1.5 |",
+    ]
+
+
+def test_continuation_of_a_table_of_words_keeps_its_first_row_as_body() -> None:
+    # The first row of the second page reads like a header — all words — but
+    # it is not the header the table opened with, so it is a body row.
+    rows = [
+        row(11, "1. 세계 채무 현황"),
+        row(21, table_html(["국가", "정책"], ["호주", "고용유지"]), type="table", page_idx=3),
+        row(22, table_html(["영국", "일자리 유지"], ["미국", "급여 보호"]), type="table", page_idx=4),
+    ]
+    result = chunker.chunk(rows, HEADERS)
+
+    assert len(result.chunks) == 1
+    assert table_lines(result.chunks[0].text) == [
+        "| 국가 | 정책 |",
+        "| --- | --- |",
+        "| 호주 | 고용유지 |",
+        "| 영국 | 일자리 유지 |",
+        "| 미국 | 급여 보호 |",
+    ]
+
+
+def test_caption_on_a_continuation_goes_back_into_the_table_as_a_row() -> None:
+    # The parser lifts a label inside the table out as the caption of the
+    # piece that follows it.
+    rows = [
+        row(11, "1. 세계 채무 현황"),
+        row(21, table_html(YEARS, ["World Output", "3.2", "3.5"]), type="table", page_idx=3),
+        row(
+            22,
+            table_html(["Advanced Economies", "0.7", "1.5"]),
+            type="table",
+            caption="Consumer\nPrices",
+            page_idx=4,
+        ),
+    ]
+    result = chunker.chunk(rows, HEADERS)
+
+    assert table_lines(result.chunks[0].text)[2:] == [
+        "| World Output | 3.2 | 3.5 |",
+        "| Consumer Prices |  |  |",
+        "| Advanced Economies | 0.7 | 1.5 |",
+    ]
+
+
+@pytest.mark.parametrize(
+    "second",
+    [
+        # a caption that numbers a table opens a new one
+        {"content": table_html(["Europe", "1.9", "2.0"]), "caption": "<표 2> 다른 표"},
+        # another number of columns
+        {"content": table_html(["Europe", "1.9"])},
+        # two pages on
+        {"content": table_html(["Europe", "1.9", "2.0"]), "page_idx": 6},
+        # under another heading
+        {"content": table_html(["Europe", "1.9", "2.0"]), "header_id": 3},
+    ],
+)
+def test_a_following_table_that_is_not_a_continuation_stays_apart(second: dict) -> None:
+    rows = [
+        row(11, "1. 세계 채무 현황"),
+        row(21, table_html(YEARS, ["Asia", "5.3", "5.3"]), type="table", page_idx=3),
+        row(22, type="table", **{"page_idx": 4, **second}),
+    ]
+    result = chunker.chunk(rows, HEADERS)
+
+    assert [c.head_content_ids for c in result.chunks] == [[21], [22]]
+
+
+def test_table_that_already_has_its_footnote_is_not_continued() -> None:
+    rows = [
+        row(11, "1. 세계 채무 현황"),
+        row(
+            21,
+            table_html(YEARS, ["Asia", "5.3", "5.3"]),
+            type="table",
+            footnote="자료: IMF",
+            page_idx=3,
+        ),
+        row(22, table_html(["Europe", "1.9", "2.0"]), type="table", page_idx=4),
+    ]
+    result = chunker.chunk(rows, HEADERS)
+
+    assert [c.head_content_ids for c in result.chunks] == [[21], [22]]
+
+
+def test_text_between_two_tables_keeps_them_apart() -> None:
+    rows = [
+        row(11, "1. 세계 채무 현황"),
+        row(21, table_html(YEARS, ["Asia", "5.3", "5.3"]), type="table"),
+        row(22, "□ 두 표 사이의 본문"),
+        row(23, table_html(["Europe", "1.9", "2.0"]), type="table"),
+    ]
+    result = chunker.chunk(rows, HEADERS)
+
+    assert [(c.chunk_type, c.head_content_ids) for c in result.chunks] == [
+        ("table", [21]),
+        ("text", [22]),
+        ("table", [23]),
+    ]
+
+
+def test_long_table_is_cut_by_rows_and_every_chunk_has_caption_header_and_footnote() -> None:
+    # 30 body lines. What is left of the 900 once the breadcrumb, caption,
+    # header and footnote are paid for holds 14 of them, so the table needs
+    # three chunks — and they come out 10, 10, 10 rather than 14, 14, 2.
+    body = [[f"row {i:02d}", "가" * 40] for i in range(30)]
+    caption = "<표 1> 긴 표\n(단위: %)"
+    rows = [
+        row(11, "1. 세계 채무 현황"),
+        row(
+            21,
+            table_html(["구분", "내용"], *body),
+            type="table",
+            caption=caption,
+            footnote="주: 추정치\n자료: IMF",
+        ),
+    ]
+    result = chunker.chunk(rows, HEADERS)
+
+    assert [len(table_lines(c.text)) - 2 for c in result.chunks] == [10, 10, 10]
+    for chunk in result.chunks:
+        assert chunk.chunk_type == "table"
+        assert chunk.text.startswith(f"{BREADCRUMB}\n{caption}\n| 구분 | 내용 |\n| --- | --- |\n")
+        assert chunk.text.endswith("\n주: 추정치\n자료: IMF")
+        assert chunk.token_count == len(chunk.text) <= 900
+        assert chunk.needs_split is False
+        assert chunk.head_content_ids == [21]
+    # Every body row is in exactly one chunk, in order.
+    assert [
+        line.split(" | ")[0] for c in result.chunks for line in table_lines(c.text)[2:]
+    ] == [f"| row {i:02d}" for i in range(30)]
+    assert result.warnings == []
+
+
+def test_table_over_several_pages_is_joined_and_then_cut() -> None:
+    first = [[f"row {i:02d}", "가" * 40] for i in range(15)]
+    rest = [[f"row {i:02d}", "가" * 40] for i in range(15, 30)]
+    rows = [
+        row(11, "1. 세계 채무 현황"),
+        row(
+            21,
+            table_html(["구분", "내용"], *first),
+            type="table",
+            caption="<표 1> 긴 표",
+            page_idx=3,
+        ),
+        row(22, table_html(*rest), type="table", footnote="자료: IMF", page_idx=4),
+    ]
+    result = chunker.chunk(rows, HEADERS)
+
+    assert len(result.chunks) == 3
+    for chunk in result.chunks:
+        # The caption came from the first page and the footnote from the last.
+        assert chunk.text.startswith(f"{BREADCRUMB}\n<표 1> 긴 표\n| 구분 | 내용 |\n")
+        assert chunk.text.endswith("\n자료: IMF")
+        assert chunk.head_content_ids == [21, 22]
+    assert sum(len(table_lines(c.text)) - 2 for c in result.chunks) == 30
+
+
+def test_table_without_a_header_row_is_cut_under_an_empty_header() -> None:
+    body = [[f"row {i:02d}", "1.5", "가" * 40] for i in range(30)]
+    rows = [row(11, "1. 세계 채무 현황"), row(21, table_html(*body), type="table")]
+    result = chunker.chunk(rows, HEADERS)
+
+    assert len(result.chunks) > 1
+    for chunk in result.chunks:
+        assert table_lines(chunk.text)[:2] == ["|  |  |  |", "| --- | --- | --- |"]
+        assert chunk.token_count <= 900
+
+
+def test_table_row_too_long_for_the_budget_is_its_own_chunk_and_flagged() -> None:
+    rows = [
+        row(11, "1. 세계 채무 현황"),
+        row(
+            21,
+            table_html(["구분", "내용"], ["짧은 행", "가"], ["긴 행", "나" * 1000], ["끝 행", "다"]),
+            type="table",
+            caption="<표 1> 긴 행",
+        ),
+    ]
+    result = chunker.chunk(rows, HEADERS)
+
+    assert [c.needs_split for c in result.chunks] == [False, True, False]
+    assert all(c.text.startswith(f"{BREADCRUMB}\n<표 1> 긴 행\n| 구분 | 내용 |") for c in result.chunks)
+    assert len([w for w in result.warnings if "needs_split" in w]) == 1
+
+
+def test_unreadable_table_over_the_budget_is_saved_whole_and_flagged() -> None:
+    nested = "<table><tr><td><table><tr><td>" + "가" * 1000 + "</td></tr></table></td></tr></table>"
+    rows = [row(11, "1. 세계 채무 현황"), row(21, nested, type="table")]
     result = chunker.chunk(rows, HEADERS)
 
     assert len(result.chunks) == 1
     assert result.chunks[0].needs_split is True
-    assert result.chunks[0].token_count > 900
+    assert any("could not be read" in w for w in result.warnings)
     assert any("needs_split" in w for w in result.warnings)
 
 

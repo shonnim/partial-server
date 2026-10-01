@@ -23,9 +23,13 @@ title are dropped, and what is left is grouped:
 * text and list rows are joined within a section and cut to a token budget
   at row boundaries, by preference right before a ``□`` line so a bullet
   keeps its children;
-* a table is always its own chunk, as Markdown, caption and footnote around
-  it;
-* an image or chart is always its own chunk, the same way.
+* a table is never mixed with text. It is read from its HTML into a header
+  and body rows; a table that runs over several pages arrives as several
+  rows, the column header on the first only, and those are joined back into
+  one table first (see ``_Table``). The table is then written as Markdown
+  and cut by body rows to the table budget, and every chunk of it carries
+  the caption, the column header and the footnote, so each reads on its own;
+* an image or chart is always its own chunk, caption and footnote around it.
 
 The token budget counts the breadcrumb. Tokens are counted by the function
 passed in, so the strategy can be exercised without loading a tokenizer.
@@ -36,14 +40,25 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from app.models.header import Header, HeaderContent
-from app.services.html_table import TableParseError, html_table_to_markdown
+from app.services.html_table import (
+    Grid,
+    TableParseError,
+    body_rows,
+    build_grid,
+    detect_header_rows,
+    flatten_headers,
+    parse_html_table,
+    render_markdown_table,
+)
 from app.services.tokenizer import count_tokens as _real_count_tokens
 
 # Token budget for a text chunk, breadcrumb included.
 TARGET_TOKENS = 600
 MIN_TOKENS = 400
 MAX_TOKENS = 800
-# A table is kept whole up to this; past it the chunk is saved as it is and
+# Token budget for a table chunk: breadcrumb, caption, column header, body
+# rows and footnote together. A chunk still past it — one body row too long,
+# or a caption and footnote that leave no room — is saved as it is and
 # flagged, see ``DraftChunk.needs_split``.
 MAX_TABLE_TOKENS = 900
 
@@ -191,7 +206,7 @@ class DraftChunk:
     token_count: int
     # ids of every header_contents row in the chunk, inlined footnotes included.
     head_content_ids: list[int]
-    # A table past the table budget, saved whole and flagged for later.
+    # A table chunk still past the table budget, saved as it is and flagged.
     needs_split: bool = False
 
 
@@ -234,6 +249,97 @@ class _Row:
                 part and part.strip() for part in (self.content, self.caption, self.footnote)
             )
         return not self.content.strip()
+
+
+# A caption that numbers its table — "<표 I-1> 세계 경제성장률 전망",
+# "[표 II -2] …" — opens a new table. Any other caption on a table that runs
+# on from the one before is a label the parser lifted out of the table body
+# ("Consumer Prices"), and goes back in as a row.
+_NUMBERED_TABLE_CAPTION = re.compile(r"^\s*[<\[(〈《［【]?\s*(?:부?표|Table)\s*[\dIVXⅠ-Ⅻ]")
+
+
+@dataclass
+class _Table:
+    """One logical table: the row it starts on and the rows that continue it.
+
+    A table that runs over several pages is stored as one ``table`` row per
+    page. The column header is printed on the first page only, so it is read
+    from the first row's HTML and the later rows add body rows under it.
+    """
+
+    pieces: list[_Row]
+    # One label per column; all empty when the table has no header row.
+    header: list[str]
+    body: list[list[str]]
+
+    @classmethod
+    def start(cls, row: _Row, grid: Grid) -> "_Table":
+        # The header is told from the cells — spans, years, labels against
+        # numbers — because these tables are written with <tr> and <td> only.
+        header_rows = detect_header_rows(grid)
+        header = flatten_headers(grid, header_rows) if header_rows else [""] * grid.width
+        return cls(pieces=[row], header=header, body=body_rows(grid, header_rows))
+
+    @property
+    def width(self) -> int:
+        return len(self.header)
+
+    @property
+    def caption(self) -> str | None:
+        return self.pieces[0].caption
+
+    @property
+    def footnotes(self) -> list[str]:
+        return [p.footnote.strip() for p in self.pieces if p.footnote and p.footnote.strip()]
+
+    @property
+    def ids(self) -> list[int]:
+        return [i for piece in self.pieces for i in piece.ids]
+
+    def continued_by(self, row: _Row, grid: Grid) -> bool:
+        """Whether ``row``, the table row right after this table, is the rest
+        of it: same section, same columns, on the same or the next page, and
+        nothing saying the table had ended or a new one begun."""
+        last = self.pieces[-1]
+        if row.header_id != last.header_id or grid.width != self.width:
+            return False
+        # Footnotes are printed under the end of a table.
+        if last.footnote and last.footnote.strip():
+            return False
+        if row.caption and _NUMBERED_TABLE_CAPTION.match(row.caption):
+            return False
+        if last.page_idx is not None and row.page_idx is not None:
+            return row.page_idx - last.page_idx in (0, 1)
+        return True
+
+    def extend(self, row: _Row, grid: Grid) -> None:
+        """Add a continuation's rows under the header already read."""
+        # The parser sometimes cuts the header row off as a table of its own:
+        # one row, an empty corner, then the column labels — "09", "10", …,
+        # which read as numbers, so no header was told. With the body
+        # arriving now, that lone row is the header.
+        if (
+            len(self.pieces) == 1
+            and len(self.body) == 1
+            and not any(self.header)
+            and not self.body[0][0]
+            and any(self.body[0])
+        ):
+            self.header = self.body.pop()
+
+        # A continuation normally has no header. When the page prints the
+        # same header again it is dropped; rows that only look like a header
+        # — the first row of a table of words — stay as body.
+        header_rows = detect_header_rows(grid)
+        if header_rows:
+            repeated = [_squash(h) for h in flatten_headers(grid, header_rows)]
+            if repeated != [_squash(h) for h in self.header]:
+                header_rows = 0
+        if row.caption and row.caption.strip():
+            label = re.sub(r"\s+", " ", row.caption).strip()
+            self.body.append([label] + [""] * (self.width - 1))
+        self.body.extend(body_rows(grid, header_rows))
+        self.pieces.append(row)
 
 
 @dataclass
@@ -291,11 +397,10 @@ class ImfHierarchicalChunker:
     ) -> StrategyResult:
         result = StrategyResult()
         prepared = self._prepare(rows, result.warnings)
-        kept = self._filter(prepared, headers)
+        kept, tables = self._read_tables(self._filter(prepared, headers), result.warnings)
 
         path = _Path()
         warned_no_path = False
-        warned_paths: set[tuple[str | None, ...]] = set()
         warned_headers: set[int] = set()
         current_header: int | None = None
         buffer: _Buffer | None = None
@@ -336,20 +441,26 @@ class ImfHierarchicalChunker:
                     path.set(level, row.content.strip())
                 continue
 
-            if path.is_empty:
-                if not warned_no_path:
-                    warned_no_path = True
-                    result.warnings.append(
-                        "content before the first I./1. heading has no breadcrumb"
-                    )
-            elif path.titles[0] and not path.titles[1] and path.key not in warned_paths:
-                warned_paths.add(path.key)
+            # Text between a part's title and its first chapter is ordinary:
+            # it is chunked under the part alone and nothing is said.
+            if path.is_empty and not warned_no_path:
+                warned_no_path = True
                 result.warnings.append(
-                    f"content directly under '{path.titles[0]}' with no chapter (1., 2.) heading"
+                    "content before the first I./1. heading has no breadcrumb"
                 )
 
             if buffer is not None and buffer.key != path.key:
                 flush()
+
+            if row.id in tables:
+                # Every chunk of a table sits where the table starts.
+                placed.extend(
+                    (seq, chunk)
+                    for chunk in self._table_chunks(
+                        tables[row.id], path.breadcrumb, result.warnings
+                    )
+                )
+                continue
 
             if row.type in STANDALONE_TYPES:
                 placed.append(
@@ -442,6 +553,46 @@ class ImfHierarchicalChunker:
                 continue
             kept.append(row)
         return kept
+
+    @staticmethod
+    def _read_tables(
+        rows: list[_Row], warnings: list[str]
+    ) -> tuple[list[_Row], dict[int, _Table]]:
+        """Read every table's HTML and join the tables that run on from the
+        one before.
+
+        Returns the rows with the continuations taken out, and the tables
+        keyed by the id of the row each starts on. A table whose HTML cannot
+        be read is in neither: its row stays, to be kept as HTML.
+        """
+        kept: list[_Row] = []
+        tables: dict[int, _Table] = {}
+        # The table a following table row may continue. Anything else in
+        # between — text, a figure, an unreadable table — closes it.
+        open_table: _Table | None = None
+
+        for row in rows:
+            if row.type != "table" or not row.content.strip():
+                kept.append(row)
+                open_table = None
+                continue
+            try:
+                grid = build_grid(parse_html_table(row.content))
+            except TableParseError as exc:
+                warnings.append(
+                    f"table row {row.id}: HTML could not be read ({exc}); kept as HTML"
+                )
+                kept.append(row)
+                open_table = None
+                continue
+
+            if open_table is not None and open_table.continued_by(row, grid):
+                open_table.extend(row, grid)
+                continue
+            open_table = _Table.start(row, grid)
+            tables[row.id] = open_table
+            kept.append(row)
+        return kept, tables
 
     @staticmethod
     def _is_inline_heading(row: _Row) -> bool:
@@ -581,23 +732,109 @@ class ImfHierarchicalChunker:
             pieces.append(joiner.join(current))
         return pieces
 
+    # ---- table chunks -----------------------------------------------------------
+
+    def _table_chunks(
+        self, table: _Table, breadcrumb: str, warnings: list[str]
+    ) -> list[DraftChunk]:
+        """One table as Markdown, cut by body rows to the table budget.
+
+        Every chunk is the breadcrumb, the caption, the column header, a run
+        of body rows and the footnotes — the same lines around different
+        rows — so no chunk of a long table is left without its title, its
+        columns or its notes.
+        """
+        lines = render_markdown_table(table.header, table.body).split("\n")
+        # The header line and the separator under it, then one line per row.
+        header_lines, row_lines = lines[:2], lines[2:]
+
+        top = [breadcrumb]
+        if table.caption and table.caption.strip():
+            top.append(table.caption.strip())
+        top.extend(header_lines)
+        bottom = table.footnotes
+
+        # What every chunk spends before it holds a single body row.
+        fixed = self.count_tokens("\n".join(top))
+        if bottom:
+            fixed += self.count_tokens("\n".join(bottom)) + 1
+        costs = [self.count_tokens(line) + 1 for line in row_lines]
+        # A table that is only its header is still one chunk.
+        spans = self._pack_rows(costs, MAX_TABLE_TOKENS - fixed) or [(0, 0)]
+
+        chunks: list[DraftChunk] = []
+        for start, end in spans:
+            text = "\n".join([*top, *row_lines[start:end], *bottom])
+            tokens = self.count_tokens(text)
+            chunks.append(
+                DraftChunk(
+                    text=text,
+                    chunk_type="table",
+                    section_path=breadcrumb,
+                    token_count=tokens,
+                    # Each chunk draws on every row of the table: the caption
+                    # is the first one's, the footnote usually the last one's.
+                    head_content_ids=table.ids,
+                    needs_split=tokens > MAX_TABLE_TOKENS,
+                )
+            )
+
+        over = [c for c in chunks if c.needs_split]
+        if over:
+            warnings.append(
+                f"table row {table.pieces[0].id}: {len(over)} of {len(chunks)} chunks still over "
+                f"{MAX_TABLE_TOKENS} tokens (largest {max(c.token_count for c in over)}); "
+                f"caption, header and footnote take {fixed} of each (needs_split)"
+            )
+        return chunks
+
+    @staticmethod
+    def _pack_rows(costs: list[int], budget: int) -> list[tuple[int, int]]:
+        """Cut a table's body rows into runs within ``budget``, as (start, end).
+
+        Greedy packing says how many chunks the table needs; the rows are
+        then spread evenly over that many, so a long table does not end in a
+        chunk of two rows. A row that is over the budget by itself is a run
+        of its own.
+        """
+        if not costs:
+            return []
+
+        greedy: list[tuple[int, int]] = []
+        start, running = 0, 0
+        for i, cost in enumerate(costs):
+            if i > start and running + cost > budget:
+                greedy.append((start, i))
+                start, running = i, 0
+            running += cost
+        greedy.append((start, len(costs)))
+        if len(greedy) == 1:
+            return greedy
+
+        # Close a run each time the running total passes the next equal share.
+        share = sum(costs) / len(greedy)
+        even: list[tuple[int, int]] = []
+        start, running = 0, 0
+        for i, cost in enumerate(costs):
+            running += cost
+            if len(even) < len(greedy) - 1 and running >= share * (len(even) + 1):
+                even.append((start, i + 1))
+                start = i + 1
+        if start < len(costs):
+            even.append((start, len(costs)))
+
+        fits = all(sum(costs[s:e]) <= budget for s, e in even)
+        return even if fits else greedy
+
     # ---- standalone chunks ------------------------------------------------------
 
     def _standalone_chunk(
         self, row: _Row, breadcrumb: str, warnings: list[str]
     ) -> DraftChunk:
-        content = row.content.strip()
-        if row.type == "table" and content:
-            # Stored as the parser's HTML; the embedder gets Markdown.
-            try:
-                content = html_table_to_markdown(content)
-            except TableParseError as exc:
-                warnings.append(
-                    f"table row {row.id}: HTML could not be read ({exc}); kept as HTML"
-                )
-
+        """An image, a chart, or a table that could not be read as one: the
+        row as it is, caption above and footnote below."""
         parts = [breadcrumb]
-        for part in (row.caption, content, row.footnote):
+        for part in (row.caption, row.content, row.footnote):
             if part and part.strip():
                 parts.append(part.strip())
         text = "\n".join(parts)
@@ -609,12 +846,12 @@ class ImfHierarchicalChunker:
             token_count=self.count_tokens(text),
             head_content_ids=row.ids,
         )
-        # TODO: split a table past the budget by rows, repeating its header
-        # row in every part. For now it is saved whole and flagged.
+        # Only a table read into rows can be cut by rows. One kept as HTML is
+        # saved whole and flagged when it is past the budget.
         if row.type == "table" and chunk.token_count > MAX_TABLE_TOKENS:
             chunk.needs_split = True
             warnings.append(
-                f"table row {row.id} is {chunk.token_count} tokens, over {MAX_TABLE_TOKENS}; "
-                "saved as one chunk (needs_split)"
+                f"table row {row.id} is {chunk.token_count} tokens, over {MAX_TABLE_TOKENS}, "
+                "and could not be split; saved as one chunk (needs_split)"
             )
         return chunk

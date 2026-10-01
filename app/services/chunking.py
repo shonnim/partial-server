@@ -55,7 +55,7 @@ class ProcessedDoc:
     filename: str
     chunks: int
     warnings: list[str] = field(default_factory=list)
-    # Chunks flagged for a later split: tables past the table budget.
+    # Table chunks still past the table budget after splitting by rows.
     needs_split: int = 0
 
     @property

@@ -33,7 +33,7 @@
               <span class="chunk-report-name" title="{{ doc.filename }}">{{ doc.filename }}</span>
               <span class="pill chunks">{{ doc.chunks }} chunk{{ '' if doc.chunks == 1 else 's' }}</span>
               {% if doc.needs_split %}
-                <span class="pill warn" title="tables over the table budget, saved whole">{{ doc.needs_split }} needs split</span>
+                <span class="pill warn" title="table chunks still over the table budget after splitting by rows">{{ doc.needs_split }} needs split</span>
               {% endif %}
             </div>
             {% if doc.warnings %}
