@@ -202,6 +202,34 @@ def test_only_the_first_citation_on_the_page_is_replaced() -> None:
     assert result.chunks[0].text.endswith("□ 첫 인용(각주) 그리고 둘째 인용1)\n○ 셋째 인용1)")
 
 
+def test_footnote_on_the_next_page_is_inlined_at_its_citation() -> None:
+    # The footnote spilt onto page 4; its citation is at the end of page 3.
+    rows = [
+        row(11, "1. 세계 채무 현황"),
+        row(12, "□ 페이지 끝의 인용1) 문장", page_idx=3),
+        row(13, "○ 다음 페이지의 본문", page_idx=4),
+        row(14, "1) 각주 내용", type="page_footnote", page_idx=4),
+    ]
+    result = chunker.chunk(rows, HEADERS)
+
+    assert result.warnings == []
+    assert result.chunks[0].text.endswith("□ 페이지 끝의 인용(각주 내용) 문장\n○ 다음 페이지의 본문")
+    assert result.chunks[0].head_content_ids == [12, 14, 13]
+
+
+def test_footnote_prefers_a_citation_on_its_own_page() -> None:
+    # Cited on both pages: the footnote's own page wins, as before.
+    rows = [
+        row(11, "1. 세계 채무 현황"),
+        row(12, "□ 전 페이지의 인용1)", page_idx=3),
+        row(13, "○ 같은 페이지의 인용1)", page_idx=4),
+        row(14, "1) 각주 내용", type="page_footnote", page_idx=4),
+    ]
+    result = chunker.chunk(rows, HEADERS)
+
+    assert result.chunks[0].text.endswith("□ 전 페이지의 인용1)\n○ 같은 페이지의 인용(각주 내용)")
+
+
 def test_footnote_cited_on_another_page_is_appended_with_a_warning() -> None:
     rows = [
         row(11, "1. 세계 채무 현황"),

@@ -16,7 +16,9 @@ where in the report it came from.
 The rows come from ``header_contents`` in id order. Before anything is
 filtered, page footnotes are folded back into the text that cites them: a
 ``page_footnote`` row ``1) 일반정부, 가계, 비금융기업`` replaces the ``1)``
-glued to a word on the same page with ``(일반정부, 가계, 비금융기업)``. Then
+glued to a word on the same page with ``(일반정부, 가계, 비금융기업)``; a
+footnote that spilt onto the next page finds its citation on the page
+before it the same way. Then
 rows that belong to no header and rows that merely repeat their header's
 title are dropped, and what is left is grouped:
 
@@ -516,7 +518,23 @@ class ImfHierarchicalChunker:
                 target.add_source(footnote_row.id)
                 return
 
-        # Not cited anywhere on the page: hang it off the nearest text row
+        # A footnote sometimes spills onto the page after its citation. When
+        # nothing on the footnote's own page cites it, the page before it is
+        # tried the same way.
+        if footnote_row.page_idx is not None:
+            previous_page = [
+                r
+                for r in rows
+                if r.type in TEXT_TYPES and r.page_idx == footnote_row.page_idx - 1
+            ]
+            for target in previous_page:
+                replaced = inline_footnote(target.content, note)
+                if replaced is not None:
+                    target.content = replaced
+                    target.add_source(footnote_row.id)
+                    return
+
+        # Not cited on its page or the one before: hang it off the nearest text row
         # before it on the same page, failing that the nearest before it at all.
         preceding = [r for r in rows[:index] if r.type in TEXT_TYPES]
         fallback = next(
