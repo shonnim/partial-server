@@ -1,10 +1,8 @@
 """The LLM form of a chunk, derived from the embedder's form.
 
-``llm_text`` is used twice — on every fresh chunk at save time, and by the
-backfill button for chunks stored before the column existed or filled by an
-earlier rule — so it must hold for every shape emb_text takes: the bracketed
-breadcrumb on its own line, the empty breadcrumb ``[]``, and rows from
-before breadcrumbs at all.
+``llm_text`` runs on every fresh chunk at save time, so it must hold for
+every shape emb_text takes: the bracketed breadcrumb on its own line, the
+empty breadcrumb ``[]``, and rows from before breadcrumbs at all.
 """
 
 from app.services.chunking import llm_text

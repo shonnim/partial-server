@@ -8,7 +8,6 @@ from app.db import get_db
 from app.services.chunking import (
     CHUNKERS,
     MAX_CHUNK_BATCH,
-    backfill_llm_text,
     chunkable_group_ids,
     document_chunks,
     run_chunking,
@@ -93,25 +92,6 @@ def chunking_run(
 
     return templates.TemplateResponse(
         request, "chunking/_partials/result.html", {"result": result}
-    )
-
-
-@router.post(
-    "/backfill-text", response_class=HTMLResponse, name="chunking_backfill_text"
-)
-def chunking_backfill_text(
-    request: Request, db: Session = Depends(get_db)
-) -> HTMLResponse:
-    """Fill the LLM ``text`` on every stored chunk missing the current form.
-
-    Chunks are now saved with both forms; this derives the missing one from
-    emb_text and section_path without re-chunking, so embeddings survive,
-    and rewrites chunks an earlier derivation rule filled.
-    """
-    filled = backfill_llm_text(db)
-
-    return templates.TemplateResponse(
-        request, "chunking/_partials/backfill_result.html", {"filled": filled}
     )
 
 

@@ -69,27 +69,6 @@
           <strong>{{ "{:,}".format(max_batch) }}</strong> per click.
         </p>
 
-        {#- Chunks made before the text column existed carry ''. This derives
-            their LLM text from emb_text in place — and re-derives chunks an
-            earlier rule filled — so embeddings survive; fresh chunks get
-            both forms at save time and need no click. -#}
-        <div class="side-box-actions group-actions">
-          <button type="button" class="btn ghost" id="btn-backfill-text"
-                  hx-post="{{ url_for('chunking_backfill_text') }}"
-                  hx-target="#chunk-result"
-                  hx-swap="innerHTML"
-                  hx-indicator="#backfill-spinner"
-                  hx-disabled-elt="this"
-                  title="derive the LLM text column for chunks stored before it existed">
-            ✍ Fill LLM text
-          </button>
-          <span class="spinner" id="backfill-spinner"></span>
-        </div>
-        <p class="side-note">
-          Fills the <strong>text</strong> column (the chunk body as an LLM
-          reads it, no breadcrumb) on every stored chunk that is missing it or
-          carries an outdated form. No re-chunking, no selection needed.
-        </p>
       </section>
 
       {#- Where the button's reply lands. Empty until the first click. -#}
