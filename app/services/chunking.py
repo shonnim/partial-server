@@ -128,6 +128,50 @@ def document_chunks(db: Session, doc_id: uuid.UUID) -> list[Chunk]:
     )
 
 
+def llm_text(emb_text: str, section_path: str | None) -> str:
+    """The chunk as an LLM should read it: the body, no breadcrumb.
+
+    ``emb_text`` opens with the bracketed breadcrumb, ``[A > B > C]``, which
+    suits the embedder; an LLM gets the body alone, with the hierarchy left
+    to ``section_path`` when a prompt wants it.
+
+    Deriving instead of rebuilding is what lets existing chunks be backfilled
+    without re-chunking — which would replace the rows and lose their
+    embeddings.
+    """
+    if section_path:
+        if emb_text.startswith(section_path + "\n"):
+            return emb_text[len(section_path) + 1 :]
+        if emb_text == section_path:
+            return ""
+    return emb_text
+
+
+def backfill_llm_text(db: Session, *, batch_size: int = 500) -> int:
+    """Re-derive ``text`` on every chunk, writing only the rows that change.
+
+    Covers chunks made before the column existed ('') and chunks filled by an
+    earlier derivation rule. Committed a batch at a time and keyed on id, so
+    an interrupted run picks up where it left off. Returns how many chunks
+    were rewritten.
+    """
+    total = 0
+    last_id = 0
+    while True:
+        chunks = db.scalars(
+            select(Chunk).where(Chunk.id > last_id).order_by(Chunk.id).limit(batch_size)
+        ).all()
+        if not chunks:
+            return total
+        for chunk in chunks:
+            derived = llm_text(chunk.emb_text, chunk.section_path)
+            if chunk.text != derived:
+                chunk.text = derived
+                total += 1
+        db.commit()
+        last_id = chunks[-1].id
+
+
 def _load_rows(db: Session, doc_id: uuid.UUID) -> list[HeaderContent]:
     return list(
         db.scalars(
@@ -156,6 +200,7 @@ def _replace_chunks(
                 doc_id=doc.id,
                 group_id=group_id,
                 emb_text=draft.text,
+                text=llm_text(draft.text, draft.section_path),
                 chunk_type=draft.chunk_type,
                 section_path=draft.section_path,
                 token_count=draft.token_count,

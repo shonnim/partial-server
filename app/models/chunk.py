@@ -34,6 +34,10 @@ class Chunk(Base):
     group_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     # The final text, breadcrumb included — what the embedder is handed.
     emb_text: Mapped[str] = mapped_column(Text, nullable=False)
+    # The same chunk as an LLM should read it: the body alone, without the
+    # bracketed breadcrumb emb_text opens with (section_path keeps that).
+    # Chunks from before the column exist with '' until backfilled.
+    text: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     # text | table | image | chart
     chunk_type: Mapped[str] = mapped_column(
         String(20), nullable=False, server_default="text"
