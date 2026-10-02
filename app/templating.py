@@ -24,6 +24,7 @@ NAV_ITEMS = (
     {"key": "sections", "label": "Section", "icon": "📑", "url": "/sections"},
     {"key": "grouping", "label": "Grouping", "icon": "🏷️", "url": "/grouping"},
     {"key": "chunking", "label": "Chunking", "icon": "🧩", "url": "/chunking"},
+    {"key": "summarizing", "label": "Summarizing", "icon": "📝", "url": "/summarizing"},
     {"key": "embedding", "label": "Embedding", "icon": "🧲", "url": "/embedding"},
 )
 

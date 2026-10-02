@@ -1,0 +1,40 @@
+{#
+  Document rows for one folder, plus the "load more" button when the folder
+  holds more than a page of them.
+
+  Each row shows how many content blocks are stored — what the summaries are
+  made from — and how the document's level 1-2 headers stand:
+  "📝 done/total". The badge opens the stored summaries; summarizing.js
+  rewrites it in place after a run, so the tree reflects it without a reload.
+#}
+{% for file in level.files %}
+  {% set sstat = sstats.get(file.id) %}
+  <li class="tree-node is-file" data-id="{{ file.id }}">
+    <div class="tree-row">
+      <input type="checkbox" class="tree-check" data-kind="file"
+             value="{{ file.id }}" aria-label="Select {{ file.filename }}">
+      <span class="tree-icon">📄</span>
+      <span class="tree-name" title="{{ file.filename }}">{{ file.filename }}</span>
+      <span class="tree-badges">
+        <span class="content-count" data-count="{{ file.content_count }}">{% if file.content_count %}<a class="pill contents" data-viewer title="the blocks stored for this document" href="{{ url_for('sections_contents', document_id=file.id) }}">{{ file.content_count }} block{{ '' if file.content_count == 1 else 's' }}</a>{% endif %}</span>
+        {#- Empty means "no level 1-2 headers"; `.summary-count:empty` collapses it. -#}
+        <span class="summary-count"
+              data-summaries-url="{{ url_for('summarizing_summaries', document_id=file.id) }}">{% if sstat %}<a class="pill {{ 'ok' if sstat.is_done else 'total' }}" data-viewer title="summarized / level 1-2 headers" href="{{ url_for('summarizing_summaries', document_id=file.id) }}">📝 {{ sstat.done }}/{{ sstat.total }}</a>{% endif %}</span>
+        <span class="pill total">{{ file.pages if file.pages is not none else '—' }} p</span>
+        <a class="btn tree-view btn-pdf" data-viewer
+           href="{{ url_for('document_viewer', document_id=file.id) }}">PDF</a>
+      </span>
+    </div>
+  </li>
+{% endfor %}
+
+{% if level.remaining_files %}
+  <li class="tree-more">
+    <button type="button" class="btn"
+            hx-get="{{ url_for('summarizing_nodes') }}?path={{ level.path|urlencode }}&offset={{ level.next_offset }}"
+            hx-target="closest .tree-more"
+            hx-swap="outerHTML">
+      ↓ Load {{ level.remaining_files }} more
+    </button>
+  </li>
+{% endif %}

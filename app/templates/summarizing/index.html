@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Summarizing · partial-server{% endblock %}
+{% block heading %}📝 Summarizing{% endblock %}
+{% block subheading %}Tick documents and write a 3-4 sentence Korean summary into each level-2 header's conclusion, then each level-1 header's from its children's.{% endblock %}
+
+{% block actions %}
+  <span id="tree-selection" class="toolbar-count">Nothing selected</span>
+{% endblock %}
+
+{% block content %}
+  <div class="parsing-layout">
+    <div class="parsing-main">
+      <div class="card tree-card">
+        <div class="tree-head">
+          <span class="tree-head-label">📚 Corpus</span>
+          <span class="tree-badges" id="tree-root-badges" data-total="{{ total }}">
+            {% if failed %}<span class="pill fail">✗ {{ "{:,}".format(failed) }}</span>{% endif %}
+            <span class="pill total">{{ "{:,}".format(total) }}</span>
+            <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
+          </span>
+        </div>
+
+        <ul class="tree tree-children" id="tree-root">
+          {% include "summarizing/_partials/level.html" %}
+        </ul>
+      </div>
+    </div>
+
+    {#- The run box sits beside the tree. The button posts the ticked
+        selection; the reply is a queue summarizing.js walks one document
+        per request, since every header is a model call. -#}
+    <aside class="side-panel">
+      <section class="card side-box" id="summarize-box">
+        <div class="side-box-head">
+          <span class="side-box-title">📝 Summarizing</span>
+        </div>
+        <form id="summarize-form"
+              hx-post="{{ url_for('summarizing_run') }}"
+              hx-vals="js:{selection: window.treeSelectionJSON()}"
+              hx-target="#summarize-result"
+              hx-swap="innerHTML"
+              hx-indicator="#summarize-spinner">
+          <dl class="stat-grid chunk-stats">
+            <div class="stat-cell" data-stat="selected"><dt>Selected documents</dt><dd id="summarize-selected">0</dd></div>
+          </dl>
+
+          <label class="group-label embed-force" for="summarize-force"
+                 title="re-summarize headers that already have a conclusion">
+            <input type="checkbox" name="force" value="1" id="summarize-force"> force re-summarize
+          </label>
+
+          <div class="side-box-actions group-actions">
+            <button type="submit" class="btn btn-primary btn-chunk" id="btn-summarize"
+                    data-label="📝 Summarize" disabled>
+              📝 Summarize
+            </button>
+            <span class="spinner" id="summarize-spinner"></span>
+          </div>
+        </form>
+        <p class="side-note">
+          Level-2 headers are summarized from their content blocks, level-1
+          headers from their children's summaries · a header with a conclusion
+          is skipped unless forced · one document per request, each summary a
+          model call · at most <strong>{{ "{:,}".format(max_batch) }}</strong>
+          per click.
+        </p>
+      </section>
+
+      {#- Where the queue lands. Empty until the first click. -#}
+      <div id="summarize-result"></div>
+    </aside>
+  </div>
+
+  {#- The viewer pop-up, same as on the documents list. -#}
+  <div id="modal"></div>
+
+  <script src="{{ static_url('js/viewer-modal.js') }}" defer></script>
+  <script src="{{ static_url('js/tree.js') }}" defer></script>
+  <script src="{{ static_url('js/summarizing.js') }}" defer></script>
+{% endblock %}

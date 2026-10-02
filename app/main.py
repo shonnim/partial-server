@@ -13,6 +13,7 @@ from app.routers import (
     parsed_docs,
     parsing,
     sections,
+    summarizing,
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -30,6 +31,7 @@ app.include_router(headers.router)
 app.include_router(parsed_docs.router)
 app.include_router(parsing.router)
 app.include_router(sections.router)
+app.include_router(summarizing.router)
 
 
 @app.get("/health")

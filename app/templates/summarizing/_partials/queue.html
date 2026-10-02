@@ -1,0 +1,58 @@
+{#
+  The outcome of a "Summarize" click: a strip with the run's standing and
+  Stop, then one visible row per document. summarizing.js posts each row's
+  data-run-url in turn (with the card's force flag) and swaps the reply into
+  its status cell, so progress is read straight off the card.
+
+  Errors come back as this card too: the caller is a button on the page, and
+  a 4xx would leave the panel blank.
+#}
+{% if error %}
+  <div class="card check-result is-error">{{ error }}</div>
+{% else %}
+  <div class="card check-result" data-run="summarizing" data-force="{{ '1' if force else '' }}">
+    <div class="run-strip" data-run-strip>
+      <span class="pill ok">✓ {{ queue.eligible|length }} to summarize</span>
+      {% if force %}<span class="pill warn" title="every header is re-summarized">force</span>{% endif %}
+      {% if queue.skipped %}
+        <span class="pill total" title="not summarized — see below">↷ {{ queue.skipped|length }} skipped</span>
+      {% endif %}
+      {% if queue.eligible %}
+        <span class="pill total" data-run-state>⏳ starting</span>
+        <span class="toolbar-spacer"></span>
+        <button type="button" class="btn ghost" data-run-stop>■ Stop</button>
+      {% else %}
+        <span class="check-note">Nothing in this selection can be summarized.</span>
+      {% endif %}
+    </div>
+
+    {% if queue.eligible %}
+      <ul class="chunk-report">
+        {% for candidate in queue.eligible %}
+          <li class="chunk-report-row gate-row" data-doc-id="{{ candidate.id }}"
+              data-name="{{ candidate.filename }}"
+              data-run-url="{{ url_for('summarizing_run_one', document_id=candidate.id) }}">
+            <div class="chunk-report-head">
+              <span class="chunk-report-name" title="{{ candidate.filename }}">{{ candidate.filename }}</span>
+              <span class="pill total" title="level 1-2 headers">{{ candidate.headers }} header{{ '' if candidate.headers == 1 else 's' }}</span>
+              <span class="gate-status"><span class="pill total">⏳ queued</span></span>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {% if queue.skipped %}
+      <ul class="chunk-report is-skipped">
+        {% for candidate in queue.skipped %}
+          <li class="chunk-report-row">
+            <div class="chunk-report-head">
+              <span class="chunk-report-name" title="{{ candidate.filename }}">{{ candidate.filename }}</span>
+              <span class="chunk-report-reason">↷ {{ candidate.reason }}</span>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+{% endif %}

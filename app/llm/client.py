@@ -1,8 +1,9 @@
 """A minimal client for the OpenAI-compatible chat endpoints.
 
-Two calls are wrapped, and nothing more: a chat completion whose reply is
-constrained to a JSON schema (the text model, for tables and outlines), and a
-chat completion that carries an image (the vision model, for figures). Both
+Three calls are wrapped, and nothing more: a chat completion whose reply is
+constrained to a JSON schema (the text model, for tables and outlines), one
+answered as free text (the text model again, for summaries), and a chat
+completion that carries an image (the vision model, for figures). Both
 servers run vLLM, so a well-formed reply is the server's job and reading it
 is ours.
 
@@ -111,6 +112,39 @@ def chat_json(
         raise LLMError("the model's reply was not a JSON object")
 
     return parsed
+
+
+def chat_text(
+    *,
+    system: str,
+    user: str,
+    max_tokens: int = 1024,
+    temperature: float = 0.0,
+    timeout_seconds: float | None = None,
+) -> str:
+    """One chat completion on the text model, answered as free text.
+
+    Returns the reply's text. Raises LLMError for anything else.
+    """
+    settings = get_settings()
+    timeout = timeout_seconds if timeout_seconds is not None else settings.llm_timeout_seconds
+
+    payload = {
+        "model": settings.llm_model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+    }
+
+    return _complete(
+        payload,
+        base_url=settings.llm_base_url,
+        api_key=settings.llm_api_key,
+        timeout=timeout,
+    )
 
 
 def chat_vision(

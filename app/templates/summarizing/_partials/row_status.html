@@ -1,0 +1,25 @@
+{#
+  The status cell of one queue row after a summarizing run on it.
+
+  data-summarized / data-failed / data-total / data-done-total are what
+  summarizing.js reads to repaint the tree badge without a reload.
+#}
+{%- set parts = [] -%}
+{%- if result.skipped %}{% set _ = parts.append(result.skipped ~ ' skipped') %}{% endif -%}
+{%- if result.calls %}{% set _ = parts.append(result.calls ~ ' call' ~ ('' if result.calls == 1 else 's')) %}{% endif -%}
+<span class="pill {{ 'fail' if result.failed else 'ok' }}"
+      data-sum-result data-doc-id="{{ result.id }}"
+      data-summarized="{{ result.summarized }}"
+      data-failed="{{ result.failed }}"
+      data-skipped="{{ result.skipped }}"
+      data-total="{{ result.total }}"
+      data-done-total="{{ result.done_total }}"
+      data-done="{{ '1' if result.done else '' }}"
+      data-summary="{{ parts|join(' · ') }}"
+      data-seconds="{{ '%.1f'|format(result.seconds) }}"
+      {% if result.error %}data-error="{{ result.error }}"{% endif %}>
+  {{ '✗' if result.failed else '✓' }} {{ result.summarized }} summarized{{ ' · ' ~ result.failed ~ ' failed' if result.failed }} · {{ '%.1f'|format(result.seconds) }}s
+</span>
+{% if result.error %}
+  <span class="gate-reason" title="{{ result.errors|join('; ') }}">{{ result.error }}</span>
+{% endif %}
