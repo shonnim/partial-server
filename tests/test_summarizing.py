@@ -10,6 +10,7 @@ import pytest
 from app.models.header import Header, HeaderContent
 from app.services import summarizing
 from app.services.summarizing import (
+    SYSTEM_DOCUMENT,
     SYSTEM_MERGE,
     SYSTEM_PARENT,
     SYSTEM_SECTION,
@@ -101,6 +102,24 @@ def test_parent_reads_its_children_titles_and_summaries() -> None:
     assert "CHAPTER HEADING:\nI. 채무의 현명한 관리" in user
     assert "- 1. 세계 채무 현황: 첫째 요약" in user
     assert "- 2. 채무 수준: 둘째 요약" in user
+
+
+# ---- the whole document -----------------------------------------------------------
+
+
+def test_overall_reads_the_chapter_summaries_in_order() -> None:
+    model = FakeModel()
+    text = summarizer_of(model).summarize_overall(
+        "IMF 재정점검보고서.pdf",
+        [("I. 채무의 현명한 관리", "1장 요약"), ("II. 재정 전망", "2장 요약")],
+    )
+
+    assert text == "요약 1"
+    system, user = model.calls[0]
+    assert system == SYSTEM_DOCUMENT
+    assert "DOCUMENT TITLE:\nIMF 재정점검보고서.pdf" in user
+    assert "1. I. 채무의 현명한 관리: 1장 요약" in user
+    assert "2. II. 재정 전망: 2장 요약" in user
 
 
 # ---- building the text ------------------------------------------------------------

@@ -7,7 +7,14 @@ Korean summary into ``headers.conclusion``, level by level:
    its subtree — its own blocks and those of its level-3 children;
 2. every level-1 header is then summarised from its level-2 children's
    summaries. A level-1 header without level-2 children falls back to its
-   own content rows, the same way a level-2 header is handled.
+   own content rows, the same way a level-2 header is handled;
+3. the whole document is then summarised from the level-1 summaries into
+   ``documents.summary`` — the general summary the pop-up opens with. A
+   document without level-1 summaries falls back to the level-2 ones.
+
+A summary is a paragraph, optionally followed by a short ordered or
+unordered Markdown list of key points; the document summary always carries
+the list.
 
 One call to the text model per header. When a unit does not fit the input
 budget, it is split into parts at block boundaries, each part is summarised
@@ -54,41 +61,54 @@ SUMMARY_LEVELS = (1, 2)
 # stays well under the ceiling. A unit past it is split and merged.
 MAX_INPUT_TOKENS = 100_000
 
-# 3-4 Korean sentences; the ceiling only stops a runaway reply.
-MAX_SUMMARY_TOKENS = 512
+# A short paragraph plus an optional list of key points; the ceiling only
+# stops a runaway reply.
+MAX_SUMMARY_TOKENS = 1024
 
 SYSTEM_SECTION = """You are a summarisation engine for a Korean-language document indexing and RAG pipeline.
 
 You are given one section of a Korean summary report of an IMF or OECD publication: its heading, and the text, tables and figure descriptions printed under it, in reading order.
 
-Write a summary of the section in Korean: 3 to 4 sentences, one paragraph.
+Write a summary of the section in Korean: 3 to 4 sentences, one paragraph. When the section covers several distinct points, you may follow the paragraph with a short Markdown list — ordered (1.) or unordered (-) — of the key points, one line each.
 
 - Name the subject, the entities (countries, groups, indicators), the period and the units where the section states them.
 - Give the main findings: the clear trends, the largest and smallest values, turning points, differences between groups, and the policy conclusions the section draws.
 - Name the important concepts and keywords in Korean so the summary is useful for semantic search; keep names printed in English as they are.
 - Do not invent figures, trends or sources that the section does not support.
-- Return ONLY the Korean paragraph: no Markdown, no headings, no JSON, no commentary about the task."""
+- Return ONLY the Korean summary (the paragraph and the optional list): no headings, no JSON, no commentary about the task."""
 
 SYSTEM_MERGE = """You are a summarisation engine for a Korean-language document indexing and RAG pipeline.
 
 One section of a Korean report was too long to read at once, so it was split into consecutive parts and each part was summarised on its own. You are given the section's heading and the part summaries, in order.
 
-Combine them into one summary of the whole section in Korean: 3 to 4 sentences, one paragraph.
+Combine them into one summary of the whole section in Korean: 3 to 4 sentences, one paragraph. When the section covers several distinct points, you may follow the paragraph with a short Markdown list — ordered (1.) or unordered (-) — of the key points, one line each.
 
 - Keep what matters for the section as a whole; drop repetition between parts.
 - Do not add anything the part summaries do not say.
-- Return ONLY the Korean paragraph: no Markdown, no headings, no JSON, no commentary about the task."""
+- Return ONLY the Korean summary (the paragraph and the optional list): no headings, no JSON, no commentary about the task."""
 
 SYSTEM_PARENT = """You are a summarisation engine for a Korean-language document indexing and RAG pipeline.
 
 You are given the heading of one chapter of a Korean summary report of an IMF or OECD publication, and the summaries of its sections, in order.
 
-Write a summary of the chapter in Korean: 3 to 4 sentences, one paragraph.
+Write a summary of the chapter in Korean: 3 to 4 sentences, one paragraph. When the chapter covers several distinct points, you may follow the paragraph with a short Markdown list — ordered (1.) or unordered (-) — of the key points, one line each.
 
 - Base it only on the section summaries; do not add anything they do not say.
 - Keep the chapter's main findings and policy conclusions; drop section detail that does not matter at chapter level.
 - Name the important concepts and keywords in Korean so the summary is useful for semantic search; keep names printed in English as they are.
-- Return ONLY the Korean paragraph: no Markdown, no headings, no JSON, no commentary about the task."""
+- Return ONLY the Korean summary (the paragraph and the optional list): no headings, no JSON, no commentary about the task."""
+
+
+SYSTEM_DOCUMENT = """You are a summarisation engine for a Korean-language document indexing and RAG pipeline.
+
+You are given the title of a Korean summary report of an IMF or OECD publication, and the summaries of its chapters, in order.
+
+Write a general summary of the whole document in Korean: one opening paragraph of 3 to 5 sentences, followed by a short Markdown list — ordered (1.) or unordered (-) — of the document's key points, one line each.
+
+- Base it only on the chapter summaries; do not add anything they do not say.
+- Keep the document's main findings and policy conclusions; drop chapter detail that does not matter at document level.
+- Name the important concepts and keywords in Korean so the summary is useful for semantic search; keep names printed in English as they are.
+- Return ONLY the Korean summary (the paragraph and the list): no headings, no JSON, no commentary about the task."""
 
 
 def _chat(system: str, user: str) -> str:
@@ -193,6 +213,15 @@ class Summarizer:
         user = f"CHAPTER HEADING:\n{title}\n\nSECTION SUMMARIES:\n{listed}"
         return self._clean(self.complete(SYSTEM_PARENT, user))
 
+    def summarize_overall(self, title: str, chapters: Sequence[tuple[str, str]]) -> str:
+        """The general summary of the whole document from its chapter summaries."""
+        listed = "\n".join(
+            f"{i}. {chapter}: {summary}"
+            for i, (chapter, summary) in enumerate(chapters, start=1)
+        )
+        user = f"DOCUMENT TITLE:\n{title}\n\nCHAPTER SUMMARIES:\n{listed}"
+        return self._clean(self.complete(SYSTEM_DOCUMENT, user))
+
     @staticmethod
     def _clean(reply: str) -> str:
         return reply.strip()
@@ -248,6 +277,9 @@ class SummarizeResult:
     skipped: int = 0
     failed: int = 0
     calls: int = 0
+    # The general summary: written this run / present after the run.
+    doc_summarized: bool = False
+    has_summary: bool = False
     # The document's standing after the run, for the tree badge.
     total: int = 0
     done_total: int = 0
@@ -257,7 +289,7 @@ class SummarizeResult:
 
     @property
     def done(self) -> bool:
-        return self.total > 0 and self.done_total == self.total
+        return self.total > 0 and self.done_total == self.total and self.has_summary
 
 
 def _load_outline(
@@ -287,7 +319,8 @@ def summarize_document(
     force: bool = False,
     summarizer: Summarizer | None = None,
 ) -> SummarizeResult:
-    """Write a conclusion for every level-2 then level-1 header of ``doc``.
+    """Write a conclusion for every level-2 then level-1 header of ``doc``,
+    then the document's general summary into ``documents.summary``.
 
     Each conclusion is committed as soon as the model answers, so a failure
     or a stop loses nothing already done. Returns what happened, never
@@ -343,6 +376,32 @@ def summarize_document(
             return from_contents(h)
 
         write(header, make)
+
+    # The general summary of the whole document, from the level-1 summaries
+    # just written — or the level-2 ones when the outline has no level-1 rows.
+    result.has_summary = bool(doc.summary and doc.summary.strip())
+    if not result.has_summary or force:
+        tops = [h for h in level1 if h.conclusion and h.conclusion.strip()] or [
+            h for h in level2 if h.conclusion and h.conclusion.strip()
+        ]
+        if tops:
+            try:
+                doc.summary = summarizer.summarize_overall(
+                    doc.filename,
+                    [(h.header.strip(), h.conclusion.strip()) for h in tops],
+                )
+                db.commit()
+                result.doc_summarized = True
+                result.has_summary = True
+                result.calls += 1
+            except LLMError as exc:
+                db.rollback()
+                result.failed += 1
+                result.errors.append(f"document summary: {exc}")
+                logger.warning("document summary of %s failed: %s", doc.id, exc)
+        else:
+            result.failed += 1
+            result.errors.append("document summary: no header summaries to build it from")
 
     result.done_total = sum(
         1 for h in [*level1, *level2] if h.conclusion and h.conclusion.strip()
@@ -406,7 +465,7 @@ def build_queue(
                 QueueSkip(doc.filename, "no content rows stored (run Section first)")
             )
             continue
-        if doc_stats.done and not force:
+        if doc_stats.is_done and not force:
             skipped.append(QueueSkip(doc.filename, "already summarized"))
             continue
         eligible.append(QueueCandidate(doc.id, doc.filename, doc_stats.total))
@@ -423,10 +482,12 @@ class DocSummaryStats:
     total: int = 0
     done: int = 0
     with_contents: bool = False
+    # Whether the general summary in ``documents.summary`` is written.
+    has_summary: bool = False
 
     @property
     def is_done(self) -> bool:
-        return self.total > 0 and self.done == self.total
+        return self.total > 0 and self.done == self.total and self.has_summary
 
 
 def file_stats(db: Session, doc_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, DocSummaryStats]:
@@ -442,14 +503,19 @@ def file_stats(db: Session, doc_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, Doc
                    ) AS done,
                    EXISTS (
                        SELECT 1 FROM header_contents hc WHERE hc.doc_id = h.doc_id
-                   ) AS with_contents
+                   ) AS with_contents,
+                   bool_or(d.summary IS NOT NULL AND btrim(d.summary) <> '') AS has_summary
             FROM headers h
+            JOIN documents d ON d.id = h.doc_id
             WHERE h.doc_id = ANY(cast(:ids AS uuid[])) AND h.level IN (1, 2)
             GROUP BY h.doc_id
         """),
         {"ids": [str(i) for i in doc_ids]},
     ).all()
-    return {r.doc_id: DocSummaryStats(r.total, r.done, r.with_contents) for r in rows}
+    return {
+        r.doc_id: DocSummaryStats(r.total, r.done, r.with_contents, r.has_summary)
+        for r in rows
+    }
 
 
 @dataclass(frozen=True)
@@ -465,7 +531,8 @@ def folder_stats(db: Session, path: str) -> dict[str, FolderSummaryStats]:
     rows = db.execute(
         text("""
             WITH scoped AS (
-                SELECT id, substring(s3_key from '^(.*)/[^/]*$') AS folder
+                SELECT id, substring(s3_key from '^(.*)/[^/]*$') AS folder,
+                       (summary IS NOT NULL AND btrim(summary) <> '') AS has_summary
                 FROM documents
                 WHERE :path = '' OR starts_with(s3_key, :path || '/')
             ),
@@ -474,14 +541,15 @@ def folder_stats(db: Session, path: str) -> dict[str, FolderSummaryStats]:
                        count(*) AS total,
                        count(*) FILTER (
                            WHERE h.conclusion IS NOT NULL AND btrim(h.conclusion) <> ''
-                       ) AS done
+                       ) AS done,
+                       bool_or(s.has_summary) AS has_summary
                 FROM scoped s
                 JOIN headers h ON h.doc_id = s.id AND h.level IN (1, 2)
                 WHERE s.folder IS NOT NULL
                 GROUP BY s.id, s.folder
             )
             SELECT split_part(folder, '/', :child_depth) AS name,
-                   count(*) FILTER (WHERE done = total) AS done
+                   count(*) FILTER (WHERE done = total AND has_summary) AS done
             FROM per_doc
             WHERE split_part(folder, '/', :child_depth) <> ''
             GROUP BY 1

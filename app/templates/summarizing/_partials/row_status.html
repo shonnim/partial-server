@@ -5,6 +5,7 @@
   summarizing.js reads to repaint the tree badge without a reload.
 #}
 {%- set parts = [] -%}
+{%- if result.doc_summarized %}{% set _ = parts.append('doc summary') %}{% endif -%}
 {%- if result.skipped %}{% set _ = parts.append(result.skipped ~ ' skipped') %}{% endif -%}
 {%- if result.calls %}{% set _ = parts.append(result.calls ~ ' call' ~ ('' if result.calls == 1 else 's')) %}{% endif -%}
 <span class="pill {{ 'fail' if result.failed else 'ok' }}"
@@ -18,7 +19,7 @@
       data-summary="{{ parts|join(' · ') }}"
       data-seconds="{{ '%.1f'|format(result.seconds) }}"
       {% if result.error %}data-error="{{ result.error }}"{% endif %}>
-  {{ '✗' if result.failed else '✓' }} {{ result.summarized }} summarized{{ ' · ' ~ result.failed ~ ' failed' if result.failed }} · {{ '%.1f'|format(result.seconds) }}s
+  {{ '✗' if result.failed else '✓' }} {{ result.summarized }} summarized{{ ' · doc summary' if result.doc_summarized }}{{ ' · ' ~ result.failed ~ ' failed' if result.failed }} · {{ '%.1f'|format(result.seconds) }}s
 </span>
 {% if result.error %}
   <span class="gate-reason" title="{{ result.errors|join('; ') }}">{{ result.error }}</span>

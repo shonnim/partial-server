@@ -1,8 +1,8 @@
 {#
   The summaries stored for one document, opened from the "📝 done/total"
-  badge on the tree row. Level-1 headers with their level-2 children under
-  them, each with the conclusion the Summarizing run wrote — or a note that
-  it has none yet.
+  badge on the tree row. The general summary of the whole document first,
+  then the level-1 headers with their level-2 children under them, each with
+  the conclusion the Summarizing run wrote — or a note that it has none yet.
 #}
 <dialog class="modal modal-narrow" aria-label="Stored summaries" data-doc-id="{{ doc.id }}">
   <header class="modal-head">
@@ -14,6 +14,18 @@
   </header>
 
   <div class="contents-body">
+    <section class="contents-block">
+      <div class="contents-meta">
+        <span class="pill group" title="general summary of the whole document">DOC</span>
+        <span class="contents-order">Document summary</span>
+      </div>
+      {% if doc.summary and doc.summary.strip() %}
+        <pre class="contents-field is-content">{{ doc.summary }}</pre>
+      {% else %}
+        <p class="check-note">No document summary yet. It is written at the end of a Summarizing run.</p>
+      {% endif %}
+    </section>
+
     {% if headers %}
       <ol class="contents-list">
         {% for header in headers %}

@@ -57,6 +57,9 @@ class Document(Base):
     )
     # Page count is a parse result, so it is unknown until PARSING completes.
     pages: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The general summary of the whole document, written by the Summarizing
+    # run from the level-1 conclusions. NULL until that run has reached it.
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     stage: Mapped[DocumentStage] = mapped_column(
         Enum(DocumentStage, name="document_stage", native_enum=True),
         nullable=False,
