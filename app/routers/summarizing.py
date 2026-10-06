@@ -7,10 +7,12 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.services.documents import get_document
 from app.services.summarizing import (
+    build_general_queue,
     build_queue,
     decorate_level,
     document_summaries,
     summarize_document,
+    summarize_document_general,
 )
 from app.services.tree import (
     DEFAULT_FILE_PAGE,
@@ -96,6 +98,36 @@ def summarizing_run(
     )
 
 
+@router.post("/general", response_class=HTMLResponse, name="summarizing_general")
+def summarizing_general(
+    request: Request,
+    selection: str = Form(""),
+    force: bool = Form(False),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """The "General Summarize" queue: only the document summary is written.
+
+    A selected document whose header summaries are missing is skipped with a
+    pointer at the full Summarize run, which writes them and the general
+    summary in one go.
+    """
+    doc_ids, error = resolve_selection(db, selection, limit=MAX_SUMMARIZE_BATCH)
+    if error:
+        return templates.TemplateResponse(
+            request, "summarizing/_partials/queue.html", {"error": error}
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "summarizing/_partials/queue.html",
+        {
+            "queue": build_general_queue(db, doc_ids, force=force),
+            "force": force,
+            "general": True,
+        },
+    )
+
+
 @router.post(
     "/{document_id}/run", response_class=HTMLResponse, name="summarizing_run_one"
 )
@@ -113,6 +145,26 @@ def summarizing_run_one(
     """
     doc = _document_or_404(db, document_id)
     result = summarize_document(db, doc, force=force)
+
+    return templates.TemplateResponse(
+        request, "summarizing/_partials/row_status.html", {"result": result}
+    )
+
+
+@router.post(
+    "/{document_id}/general",
+    response_class=HTMLResponse,
+    name="summarizing_general_one",
+)
+def summarizing_general_one(
+    request: Request,
+    document_id: uuid.UUID,
+    force: bool = Form(False),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """Write one document's general summary from its stored header summaries."""
+    doc = _document_or_404(db, document_id)
+    result = summarize_document_general(db, doc, force=force)
 
     return templates.TemplateResponse(
         request, "summarizing/_partials/row_status.html", {"result": result}

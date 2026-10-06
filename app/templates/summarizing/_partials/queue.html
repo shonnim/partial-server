@@ -10,10 +10,12 @@
 {% if error %}
   <div class="card check-result is-error">{{ error }}</div>
 {% else %}
-  <div class="card check-result" data-run="summarizing" data-force="{{ '1' if force else '' }}">
+  <div class="card check-result" data-run="summarizing"
+       data-force="{{ '1' if force else '' }}" data-general="{{ '1' if general else '' }}">
     <div class="run-strip" data-run-strip>
       <span class="pill ok">✓ {{ queue.eligible|length }} to summarize</span>
-      {% if force %}<span class="pill warn" title="every header is re-summarized">force</span>{% endif %}
+      {% if general %}<span class="pill total" title="only the document summary is written, from the stored header summaries">general only</span>{% endif %}
+      {% if force %}<span class="pill warn" title="{{ 'the document summary is rewritten' if general else 'every header is re-summarized' }}">force</span>{% endif %}
       {% if queue.skipped %}
         <span class="pill total" title="not summarized — see below">↷ {{ queue.skipped|length }} skipped</span>
       {% endif %}
@@ -31,7 +33,7 @@
         {% for candidate in queue.eligible %}
           <li class="chunk-report-row gate-row" data-doc-id="{{ candidate.id }}"
               data-name="{{ candidate.filename }}"
-              data-run-url="{{ url_for('summarizing_run_one', document_id=candidate.id) }}">
+              data-run-url="{{ url_for('summarizing_general_one', document_id=candidate.id) if general else url_for('summarizing_run_one', document_id=candidate.id) }}">
             <div class="chunk-report-head">
               <span class="chunk-report-name" title="{{ candidate.filename }}">{{ candidate.filename }}</span>
               <span class="pill total" title="level 1-2 headers">{{ candidate.headers }} header{{ '' if candidate.headers == 1 else 's' }}</span>

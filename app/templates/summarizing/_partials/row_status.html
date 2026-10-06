@@ -19,7 +19,7 @@
       data-summary="{{ parts|join(' · ') }}"
       data-seconds="{{ '%.1f'|format(result.seconds) }}"
       {% if result.error %}data-error="{{ result.error }}"{% endif %}>
-  {{ '✗' if result.failed else '✓' }} {{ result.summarized }} summarized{{ ' · doc summary' if result.doc_summarized }}{{ ' · ' ~ result.failed ~ ' failed' if result.failed }} · {{ '%.1f'|format(result.seconds) }}s
+  {{ '✗' if result.failed else '✓' }} {% if result.summarized or not result.doc_summarized %}{{ result.summarized }} summarized{{ ' · doc summary' if result.doc_summarized }}{% else %}doc summary{% endif %}{{ ' · ' ~ result.failed ~ ' failed' if result.failed }} · {{ '%.1f'|format(result.seconds) }}s
 </span>
 {% if result.error %}
   <span class="gate-reason" title="{{ result.errors|join('; ') }}">{{ result.error }}</span>

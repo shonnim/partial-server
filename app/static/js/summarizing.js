@@ -10,8 +10,14 @@
 
   const form = document.getElementById("summarize-form");
   const button = document.getElementById("btn-summarize");
+  const generalButton = document.getElementById("btn-general");
   const counter = document.getElementById("summarize-selected");
   if (!form || !button || !counter) return;
+
+  const buttons = [button, generalButton].filter(Boolean);
+  // What each button's tooltip says while it is usable (the general button
+  // carries a descriptive one in its markup).
+  const idleTitles = new Map(buttons.map((b) => [b, b.title]));
 
   let running = false;
 
@@ -20,22 +26,29 @@
     return n ? Number(n.textContent || 0) : 0;
   }
 
-  /** The button is live only while something is ticked and no queue runs. */
+  /** The buttons are live only while something is ticked and no queue runs. */
   function sync() {
     const total = pickedTotal();
     counter.textContent = total.toLocaleString();
-    button.disabled = running || total === 0;
-    button.title = total === 0 ? "Tick at least one document or folder" : "";
+    for (const b of buttons) {
+      b.disabled = running || total === 0;
+      b.title = total === 0 ? "Tick at least one document or folder" : idleTitles.get(b);
+    }
   }
 
-  function setRunning(state) {
+  // Whichever button started the run wears the spinner; both stay disabled.
+  let loadingButton = null;
+
+  function setRunning(state, which) {
     running = state;
     if (state) {
-      button.classList.add("is-loading");
-      button.innerHTML = '<span class="btn-spinner"></span> Summarizing…';
-    } else {
-      button.classList.remove("is-loading");
-      button.textContent = button.dataset.label || "Summarize";
+      loadingButton = which || button;
+      loadingButton.classList.add("is-loading");
+      loadingButton.innerHTML = '<span class="btn-spinner"></span> Summarizing…';
+    } else if (loadingButton) {
+      loadingButton.classList.remove("is-loading");
+      loadingButton.textContent = loadingButton.dataset.label || "Summarize";
+      loadingButton = null;
     }
     sync();
   }
@@ -78,10 +91,11 @@
     const state = strip.querySelector("[data-run-state]");
     const stop = strip.querySelector("[data-run-stop]");
     const force = card.dataset.force === "1";
+    const general = card.dataset.general === "1";
 
     const run = { stopped: false };
     activeRun = run;
-    setRunning(true);
+    setRunning(true, general ? generalButton : button);
 
     stop.addEventListener("click", () => {
       run.stopped = true;
@@ -100,7 +114,9 @@
         continue;
       }
 
-      state.textContent = `⚙ ${done} / ${rows.length} · headers through the model`;
+      state.textContent = general
+        ? `⚙ ${done} / ${rows.length} · doc summaries through the model`
+        : `⚙ ${done} / ${rows.length} · headers through the model`;
       const cell = row.querySelector(".gate-status");
       if (cell) cell.innerHTML = '<span class="pill total">⚙ running…</span>';
 

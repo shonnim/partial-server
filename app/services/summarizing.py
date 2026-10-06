@@ -377,32 +377,89 @@ def summarize_document(
 
         write(header, make)
 
-    # The general summary of the whole document, from the level-1 summaries
-    # just written — or the level-2 ones when the outline has no level-1 rows.
-    result.has_summary = bool(doc.summary and doc.summary.strip())
-    if not result.has_summary or force:
-        tops = [h for h in level1 if h.conclusion and h.conclusion.strip()] or [
-            h for h in level2 if h.conclusion and h.conclusion.strip()
-        ]
-        if tops:
-            try:
-                doc.summary = summarizer.summarize_overall(
-                    doc.filename,
-                    [(h.header.strip(), h.conclusion.strip()) for h in tops],
-                )
-                db.commit()
-                result.doc_summarized = True
-                result.has_summary = True
-                result.calls += 1
-            except LLMError as exc:
-                db.rollback()
-                result.failed += 1
-                result.errors.append(f"document summary: {exc}")
-                logger.warning("document summary of %s failed: %s", doc.id, exc)
-        else:
-            result.failed += 1
-            result.errors.append("document summary: no header summaries to build it from")
+    _write_doc_summary(db, doc, summarizer, level1, level2, result, force=force)
 
+    return _finish(result, level1, level2, started)
+
+
+def summarize_document_general(
+    db: Session,
+    doc: Document,
+    *,
+    force: bool = False,
+    summarizer: Summarizer | None = None,
+) -> SummarizeResult:
+    """Write only the general summary of ``doc``, from the header conclusions
+    already stored.
+
+    The headers themselves are left untouched — this is the "General
+    Summarize" path for a document whose header summaries exist but whose
+    ``documents.summary`` does not. Returns what happened, never raises.
+    """
+    summarizer = summarizer or Summarizer()
+    result = SummarizeResult(id=doc.id, filename=doc.filename)
+    started = time.monotonic()
+
+    headers, _children, _contents = _load_outline(db, doc.id)
+    level2 = [h for h in headers if h.level == 2]
+    level1 = [h for h in headers if h.level == 1]
+    result.total = len(level1) + len(level2)
+
+    _write_doc_summary(db, doc, summarizer, level1, level2, result, force=force)
+
+    return _finish(result, level1, level2, started)
+
+
+def _write_doc_summary(
+    db: Session,
+    doc: Document,
+    summarizer: Summarizer,
+    level1: list[Header],
+    level2: list[Header],
+    result: SummarizeResult,
+    *,
+    force: bool,
+) -> None:
+    """The general summary of the whole document, from the level-1 summaries —
+    or the level-2 ones when the outline has no level-1 rows.
+
+    A summary already present is kept unless forced.
+    """
+    result.has_summary = bool(doc.summary and doc.summary.strip())
+    if result.has_summary and not force:
+        return
+
+    tops = [h for h in level1 if h.conclusion and h.conclusion.strip()] or [
+        h for h in level2 if h.conclusion and h.conclusion.strip()
+    ]
+    if not tops:
+        result.failed += 1
+        result.errors.append("document summary: no header summaries to build it from")
+        return
+
+    try:
+        doc.summary = summarizer.summarize_overall(
+            doc.filename,
+            [(h.header.strip(), h.conclusion.strip()) for h in tops],
+        )
+        db.commit()
+        result.doc_summarized = True
+        result.has_summary = True
+        result.calls += 1
+    except LLMError as exc:
+        db.rollback()
+        result.failed += 1
+        result.errors.append(f"document summary: {exc}")
+        logger.warning("document summary of %s failed: %s", doc.id, exc)
+
+
+def _finish(
+    result: SummarizeResult,
+    level1: list[Header],
+    level2: list[Header],
+    started: float,
+) -> SummarizeResult:
+    """Fill in the run's closing numbers, shared by both run shapes."""
     result.done_total = sum(
         1 for h in [*level1, *level2] if h.conclusion and h.conclusion.strip()
     )
@@ -467,6 +524,41 @@ def build_queue(
             continue
         if doc_stats.is_done and not force:
             skipped.append(QueueSkip(doc.filename, "already summarized"))
+            continue
+        eligible.append(QueueCandidate(doc.id, doc.filename, doc_stats.total))
+    return SummarizeQueue(eligible=eligible, skipped=skipped)
+
+
+def build_general_queue(
+    db: Session, doc_ids: Sequence[uuid.UUID], *, force: bool = False
+) -> SummarizeQueue:
+    """The "General Summarize" split: only the document summary is written.
+
+    A document qualifies when at least one header conclusion is stored to
+    build it from; one without any is pointed at the full Summarize run
+    instead. One whose summary is already written is skipped unless forced.
+    """
+    stats = file_stats(db, doc_ids)
+    eligible: list[QueueCandidate] = []
+    skipped: list[QueueSkip] = []
+    for doc_id in doc_ids:
+        doc = db.get(Document, doc_id)
+        if doc is None:
+            skipped.append(QueueSkip(str(doc_id), "document not found"))
+            continue
+        doc_stats = stats.get(doc.id)
+        if doc_stats is None or not doc_stats.total:
+            skipped.append(
+                QueueSkip(doc.filename, "no level 1-2 headers stored (run Headers first)")
+            )
+            continue
+        if not doc_stats.done:
+            skipped.append(
+                QueueSkip(doc.filename, "no header summaries yet (run Summarize instead)")
+            )
+            continue
+        if doc_stats.has_summary and not force:
+            skipped.append(QueueSkip(doc.filename, "already has a general summary"))
             continue
         eligible.append(QueueCandidate(doc.id, doc.filename, doc_stats.total))
     return SummarizeQueue(eligible=eligible, skipped=skipped)

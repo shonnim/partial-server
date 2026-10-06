@@ -55,15 +55,31 @@
                     data-label="📝 Summarize" disabled>
               📝 Summarize
             </button>
+            {#- Only the document summary, built from header conclusions that
+                are already stored; a file without any is skipped with a
+                pointer at the full run. -#}
+            <button type="button" class="btn btn-chunk" id="btn-general"
+                    data-label="✦ General Summarize" disabled
+                    title="write only the general summary, for files whose header summaries exist"
+                    hx-post="{{ url_for('summarizing_general') }}"
+                    hx-include="closest form"
+                    hx-vals="js:{selection: window.treeSelectionJSON()}"
+                    hx-target="#summarize-result"
+                    hx-swap="innerHTML"
+                    hx-indicator="#summarize-spinner">
+              ✦ General Summarize
+            </button>
             <span class="spinner" id="summarize-spinner"></span>
           </div>
         </form>
         <p class="side-note">
           Level-2 headers are summarized from their content blocks, level-1
-          headers from their children's summaries · a header with a conclusion
-          is skipped unless forced · one document per request, each summary a
-          model call · at most <strong>{{ "{:,}".format(max_batch) }}</strong>
-          per click.
+          headers from their children's summaries, then the document's general
+          summary from those · a header with a conclusion is skipped unless
+          forced · <strong>General Summarize</strong> writes only the general
+          summary of files whose header summaries are already stored · one
+          document per request, each summary a model call · at most
+          <strong>{{ "{:,}".format(max_batch) }}</strong> per click.
         </p>
       </section>
 
