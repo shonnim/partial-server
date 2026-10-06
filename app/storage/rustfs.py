@@ -8,6 +8,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
+from urllib.parse import quote
 
 import boto3
 from botocore.client import Config
@@ -190,3 +191,32 @@ def delete_objects(bucket: str, keys: Iterable[str]) -> int:
 def put_object(bucket: str, key: str, body: bytes, *, content_type: str) -> None:
     """Write one object in full."""
     get_client().put_object(Bucket=bucket, Key=key, Body=body, ContentType=content_type)
+
+
+# How long a presigned link stays valid. Long enough to read a document,
+# short enough that a leaked link goes stale the same day.
+PRESIGN_EXPIRES_SECONDS = 60 * 60
+
+
+def presign_get(
+    bucket: str,
+    key: str,
+    *,
+    filename: str | None = None,
+    expires_in: int = PRESIGN_EXPIRES_SECONDS,
+) -> str:
+    """A presigned GET URL for one object, for clients that read RustFS directly.
+
+    Signing is local — no round trip to RustFS — so a URL comes back even for
+    a key that does not exist; fetching it is what fails. ``filename`` sets
+    the download name via response-content-disposition, RFC 5987-encoded
+    since the names are frequently Korean.
+    """
+    params: dict[str, str] = {"Bucket": bucket, "Key": key}
+    if filename:
+        params["ResponseContentDisposition"] = (
+            f"inline; filename*=UTF-8''{quote(filename)}"
+        )
+    return get_client().generate_presigned_url(
+        "get_object", Params=params, ExpiresIn=expires_in
+    )

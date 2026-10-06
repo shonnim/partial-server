@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.routers import (
     chunking,
+    client,
     dashboard,
     documents,
     embedding,
@@ -23,6 +24,7 @@ app = FastAPI(title="partial-server")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 app.include_router(chunking.router)
+app.include_router(client.router)
 app.include_router(dashboard.router)
 app.include_router(documents.router)
 app.include_router(embedding.router)

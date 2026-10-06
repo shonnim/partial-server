@@ -5,6 +5,7 @@ from app.storage.rustfs import (
     list_all_objects,
     list_objects,
     open_object,
+    presign_get,
     put_object,
     read_object,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "list_all_objects",
     "list_objects",
     "open_object",
+    "presign_get",
     "put_object",
     "read_object",
 ]
