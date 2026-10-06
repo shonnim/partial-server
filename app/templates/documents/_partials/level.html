@@ -1,0 +1,36 @@
+{#
+  One level of the tree: subfolders first, then the documents sitting directly
+  in this folder. Rendered into the parent's <ul class="tree-children">, so it
+  emits list items only.
+
+  The folder name is the control: clicking it fetches the children on the first
+  open ("click once") and shows or hides them after that. Unlike the pipeline
+  trees this one is browse-only — no checkboxes, no selection.
+#}
+{% for folder in level.folders %}
+  <li class="tree-node" data-path="{{ folder.path }}" data-total="{{ folder.total }}">
+    <div class="tree-row">
+      <button type="button" class="tree-label" aria-expanded="false"
+              hx-get="{{ url_for('documents_nodes') }}?path={{ folder.path|urlencode }}"
+              hx-target="next .tree-children"
+              hx-swap="innerHTML"
+              hx-trigger="click once">
+        <span class="tree-icon">
+          <span class="icon-closed">📁</span><span class="icon-open">📂</span>
+        </span>
+        <span class="tree-name" title="{{ folder.path }}">{{ folder.name }}</span>
+      </button>
+      <span class="tree-badges">
+        {% if folder.failed %}<span class="pill fail">✗ {{ folder.failed }}</span>{% endif %}
+        <span class="pill total">{{ folder.total }}</span>
+      </span>
+    </div>
+    <ul class="tree-children" hidden></ul>
+  </li>
+{% endfor %}
+
+{% include "documents/_partials/files.html" %}
+
+{% if level.is_empty %}
+  <li class="tree-empty">Empty folder</li>
+{% endif %}

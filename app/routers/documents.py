@@ -9,11 +9,8 @@ from app.db import get_db
 from app.models.document import Document
 from app.schemas.document import DocumentBulkIn, DocumentBulkOut
 from app.services.documents import (
-    DEFAULT_PAGE_SIZE,
     DuplicateIdsInBatch,
     get_document,
-    list_categories,
-    list_documents,
     upsert_documents,
 )
 from app.services.parse_artifacts import (
@@ -24,6 +21,7 @@ from app.services.parse_artifacts import (
     resolve_artifact,
     resolve_image,
 )
+from app.services.tree import DEFAULT_FILE_PAGE, list_level, root_totals
 from app.storage import ObjectNotFound, open_object
 from app.templating import templates
 
@@ -46,56 +44,41 @@ def create_documents(
     return DocumentBulkOut(received=received)
 
 
-def _list_context(
-    db: Session,
-    page: int,
-    q: str | None,
-    category: str | None,
-    *,
-    fragment: bool,
-) -> dict[str, object]:
-    """Everything both the full page and the HTMX fragment need to render."""
-    return {
-        "active_nav": "documents",
-        "fragment": fragment,
-        "page": list_documents(
-            db, page=page, page_size=DEFAULT_PAGE_SIZE, q=q, category=category
-        ),
-        "categories": list_categories(db),
-        "q": q,
-        "category": category,
-    }
-
-
 @router.get("", response_class=HTMLResponse, name="documents_page")
-def documents_page(
-    request: Request,
-    page: int = Query(1, ge=1),
-    q: str | None = None,
-    category: str | None = None,
-    db: Session = Depends(get_db),
-) -> HTMLResponse:
+def documents_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    """The corpus tree. Only the root level is resolved up front."""
+    total, failed = root_totals(db)
+
     return templates.TemplateResponse(
         request,
-        "documents/list.html",
-        _list_context(db, page, q, category, fragment=False),
+        "documents/index.html",
+        {
+            "active_nav": "documents",
+            "level": list_level(db),
+            "total": total,
+            "failed": failed,
+        },
     )
 
 
-@router.get("/table", response_class=HTMLResponse, name="documents_table")
-def documents_table(
+@router.get("/nodes", response_class=HTMLResponse, name="documents_nodes")
+def documents_nodes(
     request: Request,
-    page: int = Query(1, ge=1),
-    q: str | None = None,
-    category: str | None = None,
+    path: str = "",
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    """The table fragment, swapped in when a filter or the pager changes."""
-    return templates.TemplateResponse(
-        request,
-        "documents/_partials/table.html",
-        _list_context(db, page, q, category, fragment=True),
+    """One level of the tree, fetched when a folder is expanded.
+
+    A non-zero offset is the "load more files" case, which returns file rows
+    alone — the subfolders are already on the page.
+    """
+    level = list_level(db, path, file_offset=offset, file_limit=DEFAULT_FILE_PAGE)
+    template = (
+        "documents/_partials/files.html" if offset else "documents/_partials/level.html"
     )
+
+    return templates.TemplateResponse(request, template, {"level": level})
 
 
 @router.get("/{document_id}/viewer", response_class=HTMLResponse, name="document_viewer")

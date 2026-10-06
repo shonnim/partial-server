@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block title %}Documents · partial-server{% endblock %}
+{% block heading %}📄 Documents{% endblock %}
+{% block subheading %}Every registered source PDF, browsed by folder.{% endblock %}
+
+{% block content %}
+  <div class="card tree-card">
+    <div class="tree-head">
+      <span class="tree-head-label">📚 Corpus</span>
+      <span class="tree-badges" id="tree-root-badges" data-total="{{ total }}">
+        {% if failed %}<span class="pill fail">✗ {{ "{:,}".format(failed) }}</span>{% endif %}
+        <span class="pill total">{{ "{:,}".format(total) }}</span>
+      </span>
+    </div>
+
+    <ul class="tree tree-children" id="tree-root">
+      {% include "documents/_partials/level.html" %}
+    </ul>
+  </div>
+
+  {#- The PDF button swaps the viewer <dialog> in here. -#}
+  <div id="modal"></div>
+
+  <script src="{{ static_url('js/viewer-modal.js') }}" defer></script>
+  <script src="{{ static_url('js/tree.js') }}" defer></script>
+{% endblock %}

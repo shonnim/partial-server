@@ -35,6 +35,7 @@
   --tint-md: #2f9367;
   --tint-manual: #8a5cd6;
   --tint-outline: #1f8a8a;
+  --tint-ai: #c026d3;
 
   /* Outline depth. Level 1 is the strongest; each step down loses saturation,
      so nesting reads as distance from the trunk rather than as five unrelated
@@ -394,6 +395,7 @@ table.docs tbody tr:hover { background: var(--accent-tint); }
 .btn-md { --btn-tint: var(--tint-md); }
 .btn-manual { --btn-tint: var(--tint-manual); }
 .btn-outline { --btn-tint: var(--tint-outline); }
+.btn-ai { --btn-tint: var(--tint-ai); }
 
 /* A Headers button with nothing behind it stays legible but stops advertising
    itself, so a folder of untouched documents does not look finished. */
@@ -403,13 +405,13 @@ table.docs tbody tr:hover { background: var(--accent-tint); }
   color: var(--ink-faint);
 }
 
-.btn-pdf, .btn-json, .btn-md, .btn-manual, .btn-outline {
+.btn-pdf, .btn-json, .btn-md, .btn-manual, .btn-outline, .btn-ai {
   border-color: color-mix(in srgb, var(--btn-tint) 26%, #fff);
   background: color-mix(in srgb, var(--btn-tint) 7%, #fff);
   color: var(--btn-tint);
 }
 .btn-pdf:hover, .btn-json:hover, .btn-md:hover,
-.btn-manual:hover, .btn-outline:hover {
+.btn-manual:hover, .btn-outline:hover, .btn-ai:hover {
   border-color: color-mix(in srgb, var(--btn-tint) 52%, #fff);
   background: color-mix(in srgb, var(--btn-tint) 14%, #fff);
 }
