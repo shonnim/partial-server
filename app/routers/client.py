@@ -1,23 +1,54 @@
-"""The JSON API the Next.js client app talks to.
+"""The JSON API the client app talks to.
 
 Unlike the HTMX pages, every route here returns JSON and reports errors as
-status codes, same as the retrieval API.
+status codes, same as the retrieval API. The one exception is the Q&A
+endpoint, which answers over Server-Sent Events:
+
+    POST /document/{doc_id}/ask
+
+    event: progress   data: {"step", "label", "status"}
+    event: result     data: {"answer", "sources": [...]}
+    event: error      data: {"message"}
+
+Each step is announced ``running`` and then ``completed``; the stream ends
+with one ``result`` or one ``error``. The pipeline runs inside the request on
+purpose — one question, one document, a handful of model calls, no batch.
+
+Cancellation is the client closing the connection (aborting its fetch): the
+server's stream task is cancelled with it, so no further step starts; a model
+call already in flight finishes in its worker thread and its reply is
+discarded.
 """
 
+import asyncio
+import json
 import uuid
+from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.db import get_db
+from app.db import SessionLocal, get_db
+from app.embedding.client import EmbeddingError
+from app.llm import LLMError
 from app.schemas.client import (
     ClientDocSummaryOut,
     ClientDocumentOut,
     ClientHeaderSummaryOut,
 )
+from app.schemas.qa import STEP_LABELS, QAAskRequest, QAResultOut, QASourceOut
 from app.services.documents import get_document
+from app.services.qa import (
+    NOT_FOUND_MESSAGE,
+    classify_query,
+    generate_answer,
+    identify_sources,
+    retrieve_chunk,
+)
 from app.services.sections import document_headers_in_order
 from app.storage import presign_get
+from app.vectors.client import VectorStoreError
 
 router = APIRouter(prefix="/document", tags=["client"])
 
@@ -64,4 +95,107 @@ def client_document_summary(
             )
             for header in document_headers_in_order(db, doc_id)
         ],
+    )
+
+
+# ---- Q&A --------------------------------------------------------------------------
+
+
+def _event(name: str, data: dict) -> str:
+    return f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _progress(step: str, state: str) -> str:
+    return _event(
+        "progress", {"step": step, "label": STEP_LABELS[step], "status": state}
+    )
+
+
+def _result(answer: str, sources: list[QASourceOut]) -> str:
+    return _event("result", QAResultOut(answer=answer, sources=sources).model_dump())
+
+
+async def _answer_stream(query: str, doc_id: uuid.UUID) -> AsyncIterator[str]:
+    """The Q&A pipeline, one SSE string per event.
+
+    Blocking work — model calls, the embedding, the queries — runs in worker
+    threads so the event loop keeps serving between steps, and so a client
+    disconnect cancels this generator at the next await. The stream holds its
+    own session: the request dependency's may close before streaming ends.
+    """
+    try:
+        yield _progress("question-checking", "running")
+        classification = await asyncio.to_thread(classify_query, query)
+        yield _progress("question-checking", "completed")
+        if classification.query_type == "unclear":
+            yield _result(NOT_FOUND_MESSAGE, [])
+            return
+
+        with SessionLocal() as db:
+            yield _progress("context-finding", "running")
+            document = get_document(db, doc_id)
+            chunk = (
+                await asyncio.to_thread(
+                    retrieve_chunk, db, doc_id=doc_id, query=classification.search_query
+                )
+                if document is not None
+                else None
+            )
+            yield _progress("context-finding", "completed")
+            if document is None or chunk is None:
+                # Nothing of this document is embedded (or it vanished since
+                # the route checked): there is no body to ground an answer in.
+                yield _result(NOT_FOUND_MESSAGE, [])
+                return
+
+            yield _progress("generating", "running")
+            answer = await asyncio.to_thread(
+                generate_answer,
+                query,
+                chunk.text or chunk.emb_text,
+                classification.query_type,
+            )
+            sources = await asyncio.to_thread(
+                identify_sources, db, document, answer=answer, chunk=chunk
+            )
+            yield _progress("generating", "completed")
+
+        yield _result(
+            answer,
+            [
+                QASourceOut(
+                    page_idx=s.page_idx,
+                    page=s.page,
+                    text=s.text,
+                    bbox_1=s.bbox[0],
+                    bbox_2=s.bbox[1],
+                    bbox_3=s.bbox[2],
+                    bbox_4=s.bbox[3],
+                )
+                for s in sources
+            ],
+        )
+    except (EmbeddingError, LLMError, VectorStoreError) as exc:
+        yield _event("error", {"message": str(exc)})
+
+
+@router.post("/{doc_id}/ask", name="client_document_ask")
+def client_document_ask(
+    doc_id: uuid.UUID, body: QAAskRequest, db: Session = Depends(get_db)
+) -> StreamingResponse:
+    """One query about one document, answered over an SSE stream.
+
+    What can be refused before any work starts is refused as a status code,
+    the way the other routes here do it; everything after the stream begins
+    is reported as events.
+    """
+    if not body.query.strip():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "query is empty")
+    if get_document(db, doc_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "document not found")
+
+    return StreamingResponse(
+        _answer_stream(body.query, doc_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache"},
     )
