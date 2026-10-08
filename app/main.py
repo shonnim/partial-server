@@ -13,6 +13,7 @@ from app.routers import (
     headers,
     parsed_docs,
     parsing,
+    retrieval,
     sections,
     summarizing,
 )
@@ -32,6 +33,7 @@ app.include_router(grouping.router)
 app.include_router(headers.router)
 app.include_router(parsed_docs.router)
 app.include_router(parsing.router)
+app.include_router(retrieval.router)
 app.include_router(sections.router)
 app.include_router(summarizing.router)
 

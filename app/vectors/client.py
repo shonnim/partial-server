@@ -45,6 +45,14 @@ class CollectionInfo:
 
 
 @dataclass(frozen=True)
+class SearchHit:
+    """One chunk a similarity search surfaced."""
+
+    chunk_id: int
+    score: float
+
+
+@dataclass(frozen=True)
 class StoredPoint:
     """One chunk's point as Qdrant holds it."""
 
@@ -194,6 +202,40 @@ class VectorStore:
             )
         except Exception as exc:
             raise VectorStoreError(f"could not delete the document's vectors: {exc}") from exc
+
+    def search(
+        self, vector: list[float], *, limit: int, doc_id: str | None = None
+    ) -> list[SearchHit]:
+        """The chunks nearest to ``vector``, best first.
+
+        ``doc_id`` narrows the search to one document's points — the shape
+        the retrieval API uses. An absent collection is an empty answer, not
+        an error: nothing has been embedded yet.
+        """
+        query_filter = (
+            qm.Filter(
+                must=[qm.FieldCondition(key="doc_id", match=qm.MatchValue(value=doc_id))]
+            )
+            if doc_id
+            else None
+        )
+        try:
+            if not self._client.collection_exists(self.collection):
+                return []
+            response = self._client.query_points(
+                self.collection,
+                query=vector,
+                query_filter=query_filter,
+                limit=limit,
+                with_payload=False,
+                with_vectors=False,
+            )
+        except Exception as exc:
+            raise VectorStoreError(f"could not search the vectors: {exc}") from exc
+        return [
+            SearchHit(chunk_id=int(point.id), score=float(point.score))
+            for point in response.points
+        ]
 
     def get_point(self, chunk_id: int, *, head: int = 8) -> StoredPoint | None:
         """One chunk's point with the first ``head`` vector values, or None."""

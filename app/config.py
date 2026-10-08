@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     upstage_embedding_model: str = Field(
         default="solar-embedding-2-passage", alias="UPSTAGE_EMBEDDING_MODEL"
     )
+    # The other half of the pair: questions are embedded with the query
+    # model, chunks with the passage model, into the same vector space.
+    upstage_query_model: str = Field(
+        default="solar-embedding-2-query", alias="UPSTAGE_QUERY_MODEL"
+    )
     upstage_timeout_seconds: float = Field(default=30.0, alias="UPSTAGE_TIMEOUT_SECONDS")
 
     # Qdrant holds the chunk vectors. The backend runs on the host, so the

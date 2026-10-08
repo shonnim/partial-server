@@ -13,6 +13,7 @@ from app.embedding.client import (
     MAX_RETRIES,
     EmbeddingError,
     embed_passage,
+    embed_query,
 )
 
 OK_BODY = {
@@ -52,6 +53,17 @@ def test_success_returns_vector_model_and_tokens() -> None:
     body = json.loads(requests[0].content)
     assert body["input"] == "채무 전망"
     assert body["model"]
+
+
+def test_passage_and_query_go_through_their_own_models() -> None:
+    import json
+
+    transport, requests = transport_of(httpx.Response(200, json=OK_BODY))
+    embed_passage("본문", transport=transport)
+    embed_query("질문", transport=transport)
+
+    models = [json.loads(r.content)["model"] for r in requests]
+    assert models == ["solar-embedding-2-passage", "solar-embedding-2-query"]
 
 
 def test_tiny_floats_are_kept_not_filtered() -> None:

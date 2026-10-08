@@ -1,8 +1,11 @@
 """A minimal client for the Upstage embeddings endpoint.
 
-One call is wrapped: POST one passage, get one vector back. The chunker
-keeps chunks well under the API's 4,000-token ceiling, so one chunk is one
-request and there is no batching to manage.
+One call is wrapped: POST one text, get one vector back. Upstage trains the
+two sides of retrieval separately, so a chunk goes through the passage model
+and a user's question through the query model — ``embed_passage`` and
+``embed_query``, same request, different model name. The chunker keeps
+chunks well under the API's 4,000-token ceiling, so one text is one request
+and there is no batching to manage.
 
 A transport failure, a 429, or a 5xx is retried a few times with exponential
 backoff — those are the failures a moment's patience fixes. Any other 4xx is
@@ -81,7 +84,42 @@ def embed_passage(
     transport: httpx.BaseTransport | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> EmbeddingResult:
-    """One passage through the embedding model.
+    """One chunk through the passage model, for indexing."""
+    return _embed(
+        text,
+        model=get_settings().upstage_embedding_model,
+        timeout_seconds=timeout_seconds,
+        transport=transport,
+        sleep=sleep,
+    )
+
+
+def embed_query(
+    text: str,
+    *,
+    timeout_seconds: float | None = None,
+    transport: httpx.BaseTransport | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> EmbeddingResult:
+    """One user question through the query model, for searching."""
+    return _embed(
+        text,
+        model=get_settings().upstage_query_model,
+        timeout_seconds=timeout_seconds,
+        transport=transport,
+        sleep=sleep,
+    )
+
+
+def _embed(
+    text: str,
+    *,
+    model: str,
+    timeout_seconds: float | None,
+    transport: httpx.BaseTransport | None,
+    sleep: Callable[[float], None],
+) -> EmbeddingResult:
+    """One text through one model.
 
     ``transport`` and ``sleep`` exist for the tests: a mock transport stands
     in for the API, and a recording sleep proves the backoff without waiting
@@ -98,7 +136,7 @@ def embed_passage(
     timeout = (
         timeout_seconds if timeout_seconds is not None else settings.upstage_timeout_seconds
     )
-    payload: dict[str, Any] = {"input": text, "model": settings.upstage_embedding_model}
+    payload: dict[str, Any] = {"input": text, "model": model}
 
     failure = ""
     for attempt in range(MAX_RETRIES + 1):

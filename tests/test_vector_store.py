@@ -88,4 +88,27 @@ def test_delete_document_keeps_the_listed_chunk_ids(store: VectorStore) -> None:
 def test_missing_collection_reads_as_empty_not_an_error(store: VectorStore) -> None:
     assert store.get_point(1) is None
     store.delete_document(DOC_A)  # a no-op, not a crash
+    assert store.search([0.1, 0.2], limit=5) == []
     assert store.healthy() is True
+
+
+def test_search_ranks_by_similarity_within_one_document(store: VectorStore) -> None:
+    store.ensure_collection(2)
+    store.upsert(chunk_id=1, doc_id=DOC_A, vector=[1.0, 0.0], model="m")   # exact
+    store.upsert(chunk_id=2, doc_id=DOC_A, vector=[0.7, 0.7], model="m")   # close
+    store.upsert(chunk_id=3, doc_id=DOC_A, vector=[0.0, 1.0], model="m")   # far
+    store.upsert(chunk_id=4, doc_id=DOC_B, vector=[1.0, 0.0], model="m")   # other doc
+
+    hits = store.search([1.0, 0.0], limit=5, doc_id=DOC_A)
+
+    assert [h.chunk_id for h in hits] == [1, 2, 3]
+    assert hits[0].score >= hits[1].score >= hits[2].score
+    assert all(h.chunk_id != 4 for h in hits)
+
+
+def test_search_limit_caps_the_hits(store: VectorStore) -> None:
+    store.ensure_collection(2)
+    for i in range(8):
+        store.upsert(chunk_id=i, doc_id=DOC_A, vector=[1.0, i / 10], model="m")
+
+    assert len(store.search([1.0, 0.0], limit=5, doc_id=DOC_A)) == 5
