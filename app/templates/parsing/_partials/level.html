@@ -34,6 +34,12 @@
         <span class="pill total">{{ folder.total }}</span>
         {#- Filled in by tree.js as boxes are ticked; hidden while nothing is. -#}
         <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
+        {#- Opens the upload pop-up targeting this folder. -#}
+        <button type="button" class="btn tree-add" title="Upload PDFs into {{ folder.path }}"
+                aria-label="Upload PDFs into {{ folder.name }}"
+                hx-get="{{ url_for('parsing_upload_modal') }}?path={{ folder.path|urlencode }}"
+                hx-target="#modal"
+                hx-swap="innerHTML">+</button>
       </span>
     </div>
     <ul class="tree-children" hidden></ul>

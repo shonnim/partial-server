@@ -1,0 +1,32 @@
+{#
+  The outcome of one upload, rendered into the pop-up's result area: one row
+  per file, or the single error that refused the whole batch. The data-*
+  attributes are read by upload.js, which re-fetches the folder's level once
+  at least one document landed so the new rows show up without a reload.
+#}
+{% if error %}
+  <p class="upload-error">✗ {{ error }}</p>
+{% else %}
+  <ul class="upload-outcomes"
+      data-upload-done
+      data-uploaded="{{ uploaded }}"
+      data-path="{{ path }}"
+      data-nodes-url="{{ url_for('parsing_nodes') }}?path={{ path|urlencode }}">
+    {% for o in outcomes %}
+      <li class="upload-outcome">
+        {% if o.ok %}
+          <span class="pill ok">✓</span>
+          <span class="upload-name" title="{{ o.key }}">{{ o.filename }}</span>
+          <span class="pill total">{{ o.size_bytes|filesize }}</span>
+          {% if o.replaced %}
+            <span class="pill warn" title="This key was already registered; the stored file was replaced and the row refreshed.">replaced</span>
+          {% endif %}
+        {% else %}
+          <span class="pill fail">✗</span>
+          <span class="upload-name">{{ o.filename }}</span>
+          <span class="upload-reason">{{ o.error }}</span>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+{% endif %}

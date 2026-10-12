@@ -1,6 +1,16 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
@@ -20,6 +30,11 @@ from app.services.tree import (
     list_level,
     resolve_selection,
     root_totals,
+)
+from app.services.uploads import (
+    MAX_UPLOAD_FILES,
+    InvalidUploadPath,
+    upload_pdfs,
 )
 from app.templating import templates
 
@@ -70,6 +85,56 @@ def parsing_nodes(
     template = "parsing/_partials/files.html" if offset else "parsing/_partials/level.html"
 
     return templates.TemplateResponse(request, template, {"level": level})
+
+
+@router.get("/upload", response_class=HTMLResponse, name="parsing_upload_modal")
+def parsing_upload_modal(request: Request, path: str = "") -> HTMLResponse:
+    """The upload pop-up for one folder, swapped into #modal by the "+" button."""
+    return templates.TemplateResponse(
+        request,
+        "parsing/_partials/upload_modal.html",
+        {"path": path, "max_files": MAX_UPLOAD_FILES},
+    )
+
+
+@router.post("/upload", response_class=HTMLResponse, name="parsing_upload")
+def parsing_upload(
+    request: Request,
+    path: str = Form(""),
+    subpath: str = Form(""),
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """Store the pop-up's PDFs under the folder and report each one as a row.
+
+    Errors render as the result fragment too — the caller is the form inside
+    the pop-up, and a 4xx would leave its result area blank.
+    """
+
+    def failed(message: str) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request, "parsing/_partials/upload_result.html", {"error": message}
+        )
+
+    if len(files) > MAX_UPLOAD_FILES:
+        return failed(
+            f"{len(files)} files selected. Upload at most {MAX_UPLOAD_FILES} at a time."
+        )
+
+    try:
+        outcomes = upload_pdfs(db, folder_path=path, subpath=subpath, files=files)
+    except InvalidUploadPath as exc:
+        return failed(str(exc))
+
+    return templates.TemplateResponse(
+        request,
+        "parsing/_partials/upload_result.html",
+        {
+            "outcomes": outcomes,
+            "uploaded": sum(1 for o in outcomes if o.ok),
+            "path": path,
+        },
+    )
 
 
 @router.get("/health", response_class=HTMLResponse, name="parsing_health")

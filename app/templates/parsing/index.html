@@ -38,6 +38,12 @@
             {% if failed %}<span class="pill fail">✗ {{ "{:,}".format(failed) }}</span>{% endif %}
             <span class="pill total">{{ "{:,}".format(total) }}</span>
             <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
+            {#- Same upload pop-up as a folder's, targeting the bucket root. -#}
+            <button type="button" class="btn tree-add" title="Upload PDFs into the corpus root"
+                    aria-label="Upload PDFs into the corpus root"
+                    hx-get="{{ url_for('parsing_upload_modal') }}"
+                    hx-target="#modal"
+                    hx-swap="innerHTML">+</button>
           </span>
         </div>
 
@@ -92,4 +98,5 @@
   <script src="{{ static_url('js/viewer-modal.js') }}" defer></script>
   <script src="{{ static_url('js/tree.js') }}" defer></script>
   <script src="{{ static_url('js/parsing.js') }}" defer></script>
+  <script src="{{ static_url('js/upload.js') }}" defer></script>
 {% endblock %}
