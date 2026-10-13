@@ -19,11 +19,11 @@ from app.storage import put_object
 
 # Files accepted per upload. The pop-up targets one folder at a time; anything
 # bigger than this is a bulk import, which does not belong in a request.
-MAX_UPLOAD_FILES = 50
+MAX_UPLOAD_FILES = 100
 
 # One PDF is read fully into memory before it goes to RustFS, so it gets a
 # ceiling. The corpus documents are a few MB each; this is far above them.
-MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+MAX_UPLOAD_BYTES = 400 * 1024 * 1024
 
 PDF_CONTENT_TYPE = "application/pdf"
 _PDF_MAGIC = b"%PDF-"
