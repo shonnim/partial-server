@@ -37,16 +37,16 @@ What is stored, by block type:
   ``table_caption`` and ``table_footnote`` in their own columns. Nothing is
   converted and no model is involved. A table the parser gave no body for
   keeps its caption and footnotes only.
-* ``chart`` — the parser's reading of the chart in ``content``, with
-  ``chart_caption`` and ``chart_footnote`` in their own columns.
-* ``image`` — the crop is read from storage and described in Korean by the
-  vision model (see ``image_description``); the description is the content,
-  with ``image_caption`` and ``image_footnote`` in their own columns.
+* ``chart``, ``image`` — the crop is read from storage and summarised in
+  Korean by the vision model (see ``image_description``), which is shown the
+  caption, the footnote and the parser's own reading of the figure; the
+  summary is the content, with ``chart_caption`` / ``chart_footnote`` or
+  ``image_caption`` / ``image_footnote`` in their own columns.
 * anything else with a text — stored under its own type.
 
-A document is written all at once or not at all. Every image is described
-first, and only then are the previous rows replaced; an image that cannot be
-described fails the whole document with the reason, and the rows it had
+A document is written all at once or not at all. Every figure is summarised
+first, and only then are the previous rows replaced; a figure that cannot be
+summarised fails the whole document with the reason, and the rows it had
 before are left as they were.
 """
 
@@ -65,7 +65,11 @@ from app.models.document import Document
 from app.models.header import Header, HeaderContent
 from app.services.header_extraction import _title_key, header_count, locate_heading
 from app.services.headers import contents_page_index, load_content_list
-from app.services.image_description import ImageDescriptionError, describe_image_block
+from app.services.image_description import (
+    FIGURE_TYPES,
+    FigureDescriptionError,
+    describe_figure_block,
+)
 from app.services.parser_text import unescape
 from app.services.table_normalizer import join_fragments
 
@@ -371,14 +375,6 @@ def _list_text(block: dict[str, Any]) -> str | None:
     return LIST_ITEM_JOIN.join(kept) if kept else None
 
 
-def _chart_content(block: dict[str, Any]) -> str | None:
-    """A chart block's own reading of itself; its footnotes are stored apart."""
-    content = block.get("content")
-    if isinstance(content, str) and content.strip():
-        return unescape(content)
-    return None
-
-
 @dataclass
 class _Tally:
     """Running counts while a document's blocks are turned into rows."""
@@ -396,8 +392,8 @@ def _row_for(
 ) -> HeaderContent | None:
     """The row a block becomes, or None when it is not stored.
 
-    Raises ImageDescriptionError for an image the vision model could not
-    describe — the caller decides what that means for the document.
+    Raises FigureDescriptionError for a chart or image the vision model could
+    not summarise — the caller decides what that means for the document.
     """
     if not isinstance(block, dict):
         tally.skipped["not a block"] += 1
@@ -444,18 +440,17 @@ def _row_for(
         tally.tables += 1
         return row
 
-    if kind == "chart":
-        row.content = _chart_content(block)
-        row.caption = join_fragments(block.get("chart_caption"))
-        row.footnote = join_fragments(block.get("chart_footnote"))
-        tally.charts += 1
-        return row
-
-    if kind == "image":
+    if kind in FIGURE_TYPES:
+        # A chart and an image go the same way: the crop, the caption, the
+        # footnote and the parser's reading all go to the vision model, and
+        # its summary is the content.
         began = time.monotonic()
-        described = describe_image_block(db, document, block)
+        described = describe_figure_block(db, document, block)
         tally.llm_seconds += time.monotonic() - began
-        tally.images += 1
+        if kind == "chart":
+            tally.charts += 1
+        else:
+            tally.images += 1
         row.content = described.text
         row.caption = described.caption
         row.footnote = described.footnote
@@ -510,8 +505,8 @@ def run_sections(db: Session, document: Document) -> SectionResult:
         where = f"page_idx {page}" if page is not None else f"block {index}"
         try:
             row = _row_for(db, document, block, tally)
-        except ImageDescriptionError as exc:
-            return failed(f"image at {where} could not be described: {exc}")
+        except FigureDescriptionError as exc:
+            return failed(f"{block.get('type')} at {where} could not be summarised: {exc}")
         if row is None:
             continue
         row.doc_id = document.id

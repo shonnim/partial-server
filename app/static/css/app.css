@@ -63,6 +63,11 @@
 
 [hidden] { display: none !important; }
 
+/* Reserve the scrollbar's lane even while the page is short, so the layout
+   does not shift sideways every time a growing queue card tips the page
+   past one viewport and back. */
+html { scrollbar-gutter: stable; }
+
 body {
   margin: 0;
   background: var(--bg);
@@ -821,6 +826,29 @@ dialog.modal::backdrop { background: rgba(30, 35, 66, .46); backdrop-filter: blu
 #parse-result .gate-row { flex-wrap: wrap; gap: 6px 8px; }
 #parse-result .gate-row .gate-name { flex: 1 1 100%; max-width: 100%; }
 #parse-result .gate-status { justify-content: flex-start; }
+
+/* The Headers page keeps its run box and queue in the same 300px column, so
+   the queue card behaves as on Parsing — and its live run strip's pills
+   ("⏹ stopping after this document") wrap instead of forcing a horizontal
+   scrollbar. */
+#header-result .check-result { margin-bottom: 0; }
+#header-result .gate-queue,
+#header-result .check-failures { max-height: 50vh; overflow-y: auto; }
+#header-result .gate-row { flex-wrap: wrap; gap: 6px 8px; }
+#header-result .gate-row .gate-name { flex: 1 1 100%; max-width: 100%; }
+#header-result .gate-status { justify-content: flex-start; }
+#header-result .run-strip { flex-wrap: wrap; }
+#header-result .run-strip .pill,
+#header-result .gate-status .pill {
+  white-space: normal;
+  text-align: left;
+  justify-content: flex-start;
+}
+
+/* The method and page-range pickers stack in the Headers run box rather than
+   sitting inline in a toolbar. */
+.side-method { margin-bottom: 10px; }
+.side-method select { flex: 1 1 auto; min-width: 0; }
 .check-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
 .check-failures {
@@ -1044,6 +1072,48 @@ dialog.modal-manual { width: min(820px, 94vw); height: min(700px, 88vh); }
 .outline-node.lvl-5 > .outline-row > .outline-title {
   color: var(--ink-soft);
   font-size: 12.5px;
+}
+
+/* A header whose start or end page index is unknown reads red (red-500) —
+   those rows are exactly what the pop-up's Edit mode exists to fix. The ink
+   goes white on that ground or the title would drown in it. */
+.outline-row.idx-missing { background: #ef4444; }
+.outline-row.idx-missing:hover { background: #dc2626; }
+.outline-row.idx-missing .outline-title,
+.outline-row.idx-missing .outline-idx-edit { color: #fff; }
+
+/* Edit mode. The dialog carries .is-editing (toggled by headers.js); the page
+   and idx pills of every row give way to number boxes, and the header strip
+   swaps Edit for Save / Cancel. */
+.outline-idx-edit {
+  display: none;
+  flex: 0 0 auto;
+  align-items: baseline;
+  gap: 4px;
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+.modal.is-editing .outline-idx-edit { display: inline-flex; }
+.modal.is-editing .outline-idx,
+.modal.is-editing .outline-page { display: none; }
+.modal.is-editing [data-edit-indexes] { display: none; }
+.modal:not(.is-editing) [data-save-indexes],
+.modal:not(.is-editing) [data-cancel-indexes] { display: none; }
+
+.idx-input {
+  width: 56px;
+  padding: 1px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+.idx-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 /* ---------- responsive ---------- */
@@ -1567,6 +1637,53 @@ button.tree-name-open:hover { color: var(--accent); text-decoration: underline; 
 }
 .embed-chunk-text { max-height: 300px; overflow: auto; }
 #embed-result .check-result { margin-bottom: 0; }
+
+/* On the Summarizing page the queue card sits in the 300px side column. A
+   forced run queues every selected document, so the row list scrolls inside
+   the card instead of stretching the sticky panel past the viewport; and the
+   status pills ("N summarized · doc summary · 12.3s", "⚙ 3 / 10 · headers
+   through the model") are wider than the column, so they wrap instead of
+   pushing a horizontal scrollbar that flickers on every row swap. */
+#summarize-result .check-result { margin-bottom: 0; }
+/* The sticky panel is capped to the viewport and the row list is the part
+   that gives way, scrolling inside the card — so a 25-document forced run
+   never stretches the page and the scrollbar never pumps while rows swap. */
+.side-panel:has(#summarize-result .check-result) { max-height: calc(100vh - 40px); }
+#summarize-result { display: flex; flex-direction: column; min-height: 0; }
+#summarize-result .check-result { display: flex; flex-direction: column; min-height: 0; }
+#summarize-result .chunk-report {
+  flex: 1 1 auto;
+  min-height: 60px;
+  max-height: 50vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+/* The queue row carries .gate-row for summarizing.js, but .gate-row's
+   display:flex makes the head a flex item that cannot shrink below the
+   nowrap filename's full width — the ellipsis never engages and the row
+   lays out at 2-3x the column. As a block, the head's own wrapping flex
+   handles the line. */
+#summarize-result .gate-row { display: block; }
+#summarize-result .run-strip .pill,
+#summarize-result .gate-status .pill {
+  white-space: normal;
+  text-align: left;
+  justify-content: flex-start;
+}
+/* The file name gets its own full line and never grows past the card: the
+   same treatment as #parse-result/#header-result, which the queue card was
+   missing — without max-width the nowrap name can run to the card border. */
+#summarize-result .chunk-report-name {
+  flex: 1 1 100%;
+  max-width: 100%;
+}
+/* Two run buttons share the 300px column; at the app-wide 32/34px cut they
+   add up wider than the card's inner width and poke past its padding. */
+#summarize-box .btn {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
 
 /* ---------- uploads (the parsing tree's "+" buttons) ---------- */
 

@@ -5,6 +5,10 @@
   left, and type weight — because the whole point of this pop-up is to let
   someone confirm at a glance that a chapter landed under the right unit.
 
+  A row missing either page index is tinted red: those are exactly the rows
+  the Edit mode exists to fix. Edit swaps the page and idx pills for number
+  boxes and Save posts them all back as one JSON field (headers.js serialises it).
+
   data-header-count lets the page update the row's Headers button without a
   reload after an extraction.
 #}
@@ -12,7 +16,7 @@
   <ul class="outline-list">
     {% for node in nodes %}
       <li class="outline-node lvl-{{ node.level if node.level <= 5 else 5 }}">
-        <div class="outline-row">
+        <div class="outline-row{% if node.start_page_idx is none or node.end_page_idx is none %} idx-missing{% endif %}">
           <span class="outline-rail"></span>
           <span class="outline-title">{{ node.title }}</span>
           {% if node.start_page is not none %}
@@ -23,6 +27,20 @@
               idx {{ node.start_page_idx if node.start_page_idx is not none else '?' }}–{{ node.end_page_idx if node.end_page_idx is not none else '?' }}
             </span>
           {% endif %}
+          <span class="outline-idx-edit" data-header-id="{{ node.id }}">
+            <span class="idx-edit-label">p.</span>
+            <input type="number" class="idx-input" data-page-start min="0" step="1"
+                   value="{{ node.start_page if node.start_page is not none else '' }}"
+                   placeholder="?" aria-label="printed page number">
+            <span class="idx-edit-label">idx</span>
+            <input type="number" class="idx-input" data-idx-start min="0" step="1"
+                   value="{{ node.start_page_idx if node.start_page_idx is not none else '' }}"
+                   placeholder="?" aria-label="start page_idx">
+            <span class="idx-edit-label">–</span>
+            <input type="number" class="idx-input" data-idx-end min="0" step="1"
+                   value="{{ node.end_page_idx if node.end_page_idx is not none else '' }}"
+                   placeholder="?" aria-label="end page_idx">
+          </span>
           {% if node.children %}
             <span class="pill total outline-kids">{{ node.children|length }} ↓</span>
           {% endif %}
@@ -41,13 +59,31 @@
       {% if saved is not none %}
         <span class="pill ok">✓ {{ saved }} saved</span>
       {% endif %}
+      {% if updated is defined and updated is not none %}
+        <span class="pill ok">✓ {{ updated }} updated</span>
+      {% endif %}
+      <span class="spinner" id="outline-spinner"></span>
       <a class="btn btn-manual" data-viewer
          href="{{ url_for('header_manual_form', document_id=doc.id) }}">
         {{ 'Redo' if roots else 'Manual' }}
       </a>
+      {% if roots %}
+        <button type="button" class="btn" data-edit-indexes>Edit</button>
+        <button type="button" class="btn btn-primary" data-save-indexes
+                hx-post="{{ url_for('header_indexes_update', document_id=doc.id) }}"
+                hx-vals="js:{indexes: window.headerIndexEdits()}"
+                hx-target="#modal"
+                hx-swap="innerHTML"
+                hx-indicator="#outline-spinner">Save</button>
+        <button type="button" class="btn ghost" data-cancel-indexes>Cancel</button>
+      {% endif %}
       <button type="button" class="btn" data-close-modal>Close</button>
     </span>
   </header>
+
+  {% if error is defined and error %}
+    <p class="parsed-error">⚠ {{ error }}</p>
+  {% endif %}
 
   <div class="outline-body">
     {% if roots %}

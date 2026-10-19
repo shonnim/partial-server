@@ -12,9 +12,9 @@ Korean summary into ``headers.conclusion``, level by level:
    ``documents.summary`` — the general summary the pop-up opens with. A
    document without level-1 summaries falls back to the level-2 ones.
 
-A summary is a paragraph, optionally followed by a short ordered or
-unordered Markdown list of key points; the document summary always carries
-the list.
+A summary is Markdown: a paragraph with the important parts bolded,
+optionally followed by a short ordered or unordered list of key points; the
+document summary always carries the list.
 
 One call to the text model per header. When a unit does not fit the input
 budget, it is split into parts at block boundaries, each part is summarised
@@ -69,46 +69,54 @@ SYSTEM_SECTION = """You are a summarisation engine for a Korean-language documen
 
 You are given one section of a Korean summary report of an IMF or OECD publication: its heading, and the text, tables and figure descriptions printed under it, in reading order.
 
-Write a summary of the section in Korean: 3 to 4 sentences, one paragraph. When the section covers several distinct points, you may follow the paragraph with a short Markdown list — ordered (1.) or unordered (-) — of the key points, one line each.
+Write a summary of the section in Korean, formatted as Markdown: a paragraph of 3 to 4 sentences, optionally followed by a short Markdown list — ordered (1.) or unordered (-) — of the key points when the section covers several distinct points, one line each.
 
+- Write in the Korean 개조식 style (문장 종결 생략): end every sentence with a nominal ending such as "~함", "~임", "~됨", "~음" or a noun phrase — never a full ending like "~한다", "~합니다" or "~이다".
+- Bold the most important parts — the key figures, turning points and conclusions — with **...**.
 - Name the subject, the entities (countries, groups, indicators), the period and the units where the section states them.
-- Give the main findings: the clear trends, the largest and smallest values, turning points, differences between groups, and the policy conclusions the section draws.
+- Give only the main findings: the clearest trends, the key figures, and the policy conclusions the section draws.
 - Name the important concepts and keywords in Korean so the summary is useful for semantic search; keep names printed in English as they are.
 - Do not invent figures, trends or sources that the section does not support.
-- Return ONLY the Korean summary (the paragraph and the optional list): no headings, no JSON, no commentary about the task."""
+- Return ONLY the Korean summary (the paragraph and the optional list): no headings, no code fences, no JSON, no commentary about the task."""
 
 SYSTEM_MERGE = """You are a summarisation engine for a Korean-language document indexing and RAG pipeline.
 
 One section of a Korean report was too long to read at once, so it was split into consecutive parts and each part was summarised on its own. You are given the section's heading and the part summaries, in order.
 
-Combine them into one summary of the whole section in Korean: 3 to 4 sentences, one paragraph. When the section covers several distinct points, you may follow the paragraph with a short Markdown list — ordered (1.) or unordered (-) — of the key points, one line each.
+Combine them into one summary of the whole section in Korean, formatted as Markdown: a paragraph of 3 to 4 sentences, optionally followed by a short Markdown list — ordered (1.) or unordered (-) — of the key points when the section covers several distinct points, one line each.
 
+- Write in the Korean 개조식 style (문장 종결 생략): end every sentence with a nominal ending such as "~함", "~임", "~됨", "~음" or a noun phrase — never a full ending like "~한다", "~합니다" or "~이다".
+- Bold the most important parts — the key figures, turning points and conclusions — with **...**.
 - Keep what matters for the section as a whole; drop repetition between parts.
 - Do not add anything the part summaries do not say.
-- Return ONLY the Korean summary (the paragraph and the optional list): no headings, no JSON, no commentary about the task."""
+- Return ONLY the Korean summary (the paragraph and the optional list): no headings, no code fences, no JSON, no commentary about the task."""
 
 SYSTEM_PARENT = """You are a summarisation engine for a Korean-language document indexing and RAG pipeline.
 
 You are given the heading of one chapter of a Korean summary report of an IMF or OECD publication, and the summaries of its sections, in order.
 
-Write a summary of the chapter in Korean: 3 to 4 sentences, one paragraph. When the chapter covers several distinct points, you may follow the paragraph with a short Markdown list — ordered (1.) or unordered (-) — of the key points, one line each.
+Write a summary of the chapter in Korean, formatted as Markdown: a paragraph of 3 to 4 sentences, optionally followed by a short Markdown list — ordered (1.) or unordered (-) — of the key points when the chapter covers several distinct points, one line each.
 
+- Write in the Korean 개조식 style (문장 종결 생략): end every sentence with a nominal ending such as "~함", "~임", "~됨", "~음" or a noun phrase — never a full ending like "~한다", "~합니다" or "~이다".
+- Bold the most important parts — the key figures, turning points and conclusions — with **...**.
 - Base it only on the section summaries; do not add anything they do not say.
 - Keep the chapter's main findings and policy conclusions; drop section detail that does not matter at chapter level.
 - Name the important concepts and keywords in Korean so the summary is useful for semantic search; keep names printed in English as they are.
-- Return ONLY the Korean summary (the paragraph and the optional list): no headings, no JSON, no commentary about the task."""
+- Return ONLY the Korean summary (the paragraph and the optional list): no headings, no code fences, no JSON, no commentary about the task."""
 
 
 SYSTEM_DOCUMENT = """You are a summarisation engine for a Korean-language document indexing and RAG pipeline.
 
 You are given the title of a Korean summary report of an IMF or OECD publication, and the summaries of its chapters, in order.
 
-Write a general summary of the whole document in Korean: one opening paragraph of 3 to 5 sentences, followed by a short Markdown list — ordered (1.) or unordered (-) — of the document's key points, one line each.
+Write a general summary of the whole document in Korean, formatted as Markdown: one opening paragraph of 3 to 5 sentences, followed by a short Markdown list — ordered (1.) or unordered (-) — of the document's key points, one line each.
 
+- Write in the Korean 개조식 style (문장 종결 생략): end every sentence with a nominal ending such as "~함", "~임", "~됨", "~음" or a noun phrase — never a full ending like "~한다", "~합니다" or "~이다".
+- Bold the most important parts — the key figures, turning points and conclusions — with **...**.
 - Base it only on the chapter summaries; do not add anything they do not say.
 - Keep the document's main findings and policy conclusions; drop chapter detail that does not matter at document level.
 - Name the important concepts and keywords in Korean so the summary is useful for semantic search; keep names printed in English as they are.
-- Return ONLY the Korean summary (the paragraph and the list): no headings, no JSON, no commentary about the task."""
+- Return ONLY the Korean summary (the paragraph and the list): no headings, no code fences, no JSON, no commentary about the task."""
 
 
 def _chat(system: str, user: str) -> str:

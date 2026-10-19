@@ -1,13 +1,18 @@
-"""Path and filename handling behind the parsing tree's upload pop-up."""
+"""Path, filename, and metadata handling behind the parsing tree's upload pop-up."""
+
+from io import BytesIO
 
 import pytest
+from pypdf import PdfWriter
 
 from app.services.uploads import (
     InvalidUploadFile,
     InvalidUploadPath,
     build_key,
+    category_of,
     clean_pdf_filename,
     clean_subpath,
+    count_pages,
     validate_folder_path,
 )
 
@@ -81,3 +86,37 @@ def test_key_joins_folder_subpath_and_name() -> None:
 def test_key_skips_the_empty_parts() -> None:
     assert build_key("reports", "", "doc.pdf") == "reports/doc.pdf"
     assert build_key("", "", "doc.pdf") == "doc.pdf"
+
+
+# ---- category from the key -----------------------------------------------------
+
+
+def test_category_is_the_keys_first_folder() -> None:
+    key = "재정간행물/월간나라재정/2026_월간나라재정_6월/한국재정정보원_2026 월간나라재정_6월.pdf"
+    assert category_of(key) == "재정간행물"
+    assert category_of("reports/doc.pdf") == "reports"
+
+
+def test_category_of_a_root_key_is_none() -> None:
+    assert category_of("doc.pdf") is None
+
+
+# ---- page count ----------------------------------------------------------------
+
+
+def _pdf_with_pages(n: int) -> bytes:
+    writer = PdfWriter()
+    for _ in range(n):
+        writer.add_blank_page(width=595, height=842)
+    out = BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
+def test_count_pages_reads_the_pdf() -> None:
+    assert count_pages(_pdf_with_pages(1)) == 1
+    assert count_pages(_pdf_with_pages(3)) == 3
+
+
+def test_count_pages_is_none_for_unreadable_bytes() -> None:
+    assert count_pages(b"%PDF-1.7 but nothing else") is None

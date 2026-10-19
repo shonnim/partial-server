@@ -58,7 +58,7 @@ from app.storage import (
 
 # How many documents one click may queue. Each one is a full VLM parse, so a
 # selection is capped rather than left to grow into an all-night job.
-MAX_PARSE_BATCH = 50
+MAX_PARSE_BATCH = 100
 
 # How often the browser asks after the tasks in flight.
 POLL_SECONDS = 10
@@ -67,8 +67,8 @@ POLL_SECONDS = 10
 HEALTH_SECONDS = 5
 
 # The whole PDF is uploaded to the parsing service, so it has to fit in memory
-# here first.
-MAX_PDF_BYTES = 200 * 1024 * 1024
+# here first. Kept in step with the 500 MB upload ceiling in uploads.py.
+MAX_PDF_BYTES = 500 * 1024 * 1024
 
 # The folder inside the result zip whose contents become the run directory.
 _RESULT_FOLDER = "vlm"

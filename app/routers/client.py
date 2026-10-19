@@ -41,10 +41,16 @@ from app.schemas.qa import STEP_LABELS, QAAskRequest, QAResultOut, QASourceOut
 from app.services.documents import get_document
 from app.services.qa import (
     NOT_FOUND_MESSAGE,
+    chunk_answers,
     classify_query,
+    find_stored_summary,
     generate_answer,
+    generate_summary_answer,
     identify_sources,
+    query_pages_exist,
+    requested_pages,
     retrieve_chunk,
+    suggest_questions,
 )
 from app.services.sections import document_headers_in_order
 from app.storage import presign_get
@@ -111,8 +117,13 @@ def _progress(step: str, state: str) -> str:
     )
 
 
-def _result(answer: str, sources: list[QASourceOut]) -> str:
-    return _event("result", QAResultOut(answer=answer, sources=sources).model_dump())
+def _result(answer: str, sources: list[QASourceOut], suggestions: list[str]) -> str:
+    return _event(
+        "result",
+        QAResultOut(
+            answer=answer, sources=sources, suggested_questions=suggestions
+        ).model_dump(),
+    )
 
 
 async def _answer_stream(query: str, doc_id: uuid.UUID) -> AsyncIterator[str]:
@@ -125,14 +136,61 @@ async def _answer_stream(query: str, doc_id: uuid.UUID) -> AsyncIterator[str]:
     """
     try:
         yield _progress("question-checking", "running")
+        # A query that points at a page the document does not reach is refused
+        # here, before any model call. Only a query naming a page needs the
+        # document's content list, so only that one opens a session.
+        if requested_pages(query):
+            with SessionLocal() as db:
+                document = get_document(db, doc_id)
+                pages_ok = (
+                    await asyncio.to_thread(query_pages_exist, db, document, query)
+                    if document is not None
+                    else True
+                )
+            if not pages_ok:
+                yield _progress("question-checking", "completed")
+                yield _result(NOT_FOUND_MESSAGE, [], [])
+                return
+
         classification = await asyncio.to_thread(classify_query, query)
         yield _progress("question-checking", "completed")
         if classification.query_type == "unclear":
-            yield _result(NOT_FOUND_MESSAGE, [])
+            yield _result(NOT_FOUND_MESSAGE, [], [])
             return
 
+        yield _progress("context-finding", "running")
+
+        # A summary request is routed by scope before any retrieval: the
+        # Summarizing run's stored summary — documents.summary for the whole
+        # report, the header's conclusion for one section — already answers
+        # it. Only a summary request with no stored summary to serve falls
+        # through to the body pipeline below.
+        if classification.query_type == "summary":
+            with SessionLocal() as db:
+                document = get_document(db, doc_id)
+                stored = (
+                    await asyncio.to_thread(find_stored_summary, db, document, query)
+                    if document is not None
+                    else None
+                )
+                if stored is not None:
+                    yield _progress("context-finding", "completed")
+                    yield _progress("generating", "running")
+                    answer, suggestions = await asyncio.gather(
+                        asyncio.to_thread(
+                            generate_summary_answer,
+                            query,
+                            stored.text,
+                            section=stored.section,
+                        ),
+                        asyncio.to_thread(suggest_questions, db, doc_id),
+                    )
+                    yield _progress("generating", "completed")
+                    # A stored summary spans pages, so it names no source block.
+                    yield _result(answer, [], suggestions)
+                    return
+
         with SessionLocal() as db:
-            yield _progress("context-finding", "running")
             document = get_document(db, doc_id)
             chunk = (
                 await asyncio.to_thread(
@@ -141,19 +199,34 @@ async def _answer_stream(query: str, doc_id: uuid.UUID) -> AsyncIterator[str]:
                 if document is not None
                 else None
             )
+            # The nearest chunk is not necessarily the answering chunk: one
+            # model call verifies the passage actually states what the query
+            # needs before an answer is written over it.
+            grounded = (
+                await asyncio.to_thread(chunk_answers, query, chunk.text or chunk.emb_text)
+                if chunk is not None
+                else False
+            )
             yield _progress("context-finding", "completed")
-            if document is None or chunk is None:
+            if document is None or chunk is None or not grounded:
                 # Nothing of this document is embedded (or it vanished since
-                # the route checked): there is no body to ground an answer in.
-                yield _result(NOT_FOUND_MESSAGE, [])
+                # the route checked), or what was found does not hold the
+                # answer: there is no body to ground an answer in.
+                yield _result(NOT_FOUND_MESSAGE, [], [])
                 return
 
             yield _progress("generating", "running")
-            answer = await asyncio.to_thread(
-                generate_answer,
-                query,
-                chunk.text or chunk.emb_text,
-                classification.query_type,
+            # The 추천질문 box rides along with every answer. Its model call
+            # runs beside the answer's, costing no extra wall time; only the
+            # suggestion thread touches the session, so the two never share it.
+            answer, suggestions = await asyncio.gather(
+                asyncio.to_thread(
+                    generate_answer,
+                    query,
+                    chunk.text or chunk.emb_text,
+                    classification.query_type,
+                ),
+                asyncio.to_thread(suggest_questions, db, doc_id),
             )
             sources = await asyncio.to_thread(
                 identify_sources, db, document, answer=answer, chunk=chunk
@@ -174,6 +247,7 @@ async def _answer_stream(query: str, doc_id: uuid.UUID) -> AsyncIterator[str]:
                 )
                 for s in sources
             ],
+            suggestions,
         )
     except (EmbeddingError, LLMError, VectorStoreError) as exc:
         yield _event("error", {"message": str(exc)})

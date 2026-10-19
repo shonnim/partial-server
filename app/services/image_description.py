@@ -1,17 +1,19 @@
-"""Turning a parsed image block into a searchable Korean description.
+"""Turning a parsed figure — an image or a chart — into a short Korean summary.
 
 The parser leaves a figure as a crop in the run's ``images/`` folder, with
-whatever caption and footnote text stood beside it on the page. Pixels are
-not searchable; the vision model is asked to say what the figure shows, in
-Korean, with the footnote folded in as context, and that description is what
-``header_contents.content`` holds for the block.
+whatever caption and footnote text stood beside it on the page and its own
+reading of the figure: the text it could see in an image, or a table of the
+values it read off a chart. Pixels are not searchable; the vision model is
+shown the crop with all three as context and asked for four or five Korean
+sentences — what the figure shows and what stands out in it — and that
+summary is what ``header_contents.content`` holds for the block.
 
 The crop is read from RustFS and sent inline as base64: the vision server
-has no way to reach this panel's image URLs. One call per image, no retry —
-a description cannot be validated the way a table can, so there is nothing
-to send back — and every failure raises ``ImageDescriptionError`` with the
+has no way to reach this panel's image URLs. One call per figure, no retry —
+a summary cannot be validated the way a table can, so there is nothing to
+send back — and every failure raises ``FigureDescriptionError`` with the
 reason: a crop missing from storage, a block naming no image, a model that
-cannot be reached or answers empty. The caller decides what a failed image
+cannot be reached or answers empty. The caller decides what a failed figure
 means for the document.
 """
 
@@ -24,6 +26,7 @@ from sqlalchemy.orm import Session
 from app.llm import LLMError, chat_vision
 from app.models.document import Document
 from app.services.parse_artifacts import ArtifactUnavailable, resolve_image
+from app.services.parser_text import unescape
 from app.services.table_normalizer import join_fragments
 from app.storage import ObjectNotFound, read_object
 
@@ -31,47 +34,39 @@ from app.storage import ObjectNotFound, read_object
 # the model should be asked about, and it is refused rather than sent.
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
-# The description is a few paragraphs at most. Enough for a multi-panel
-# figure; not so much that a rambling reply runs for minutes.
-MAX_DESCRIPTION_TOKENS = 1024
+# Four or five Korean sentences; the ceiling only stops a runaway reply.
+MAX_DESCRIPTION_TOKENS = 512
 
-SYSTEM_PROMPT = """You are a chart and figure description engine for a Korean-language document indexing and RAG pipeline.
+# The block types this module describes. Each keeps its caption and footnote
+# under its own keys in the parser's JSON.
+FIGURE_TYPES = frozenset({"image", "chart"})
 
-Your task is to analyze the provided image and generate a detailed semantic description of what is represented in the image.
+SYSTEM_PROMPT = """You are a figure summarisation engine for a Korean-language document indexing and RAG pipeline.
 
-The final response MUST be written entirely in Korean.
+You are shown one figure — a chart, graph, diagram, or image — cropped from a page of a Korean report, together with the text the page printed beside it:
 
-The description will be stored as text and embedded into a vector database, so describe the image in a way that makes it useful for semantic search and RAG retrieval.
+- CAPTION: the figure's title as printed, often with a figure number and units.
+- FOOTNOTE: the notes and source printed under the figure.
+- EXTRACTED CONTENT: what a document parser read off the figure — the text visible in an image, or a table of the values it read from a chart. It may be incomplete or slightly wrong; the picture is the authority.
 
-## Description requirements
+Write a summary of the figure in Korean: 4 to 5 sentences, one paragraph.
 
-1. Describe the overall subject and purpose of the image.
-2. If the image contains multiple charts, figures, panels, or sections, describe each major part separately.
-3. Explain what is being compared, measured, or illustrated.
-4. Include important entities, countries, organizations, categories, concepts, and technical terms visible in the image.
-5. Describe important axis labels, legends, time periods, units, and labels when they are readable.
-6. Describe clearly visible trends, relationships, differences, or patterns when they are supported by the image.
-7. Include important readable text from the image when it helps understand or retrieve the content.
-8. Use the provided IMAGE FOOTNOTE as additional context. Preserve important source information, figure numbers, explanatory notes, definitions, and other relevant information from it.
-9. Combine the visual information and IMAGE FOOTNOTE into one coherent description.
-10. Do not blindly copy the entire footnote if it is not useful; integrate its meaningful information naturally into the description.
-11. Do not attempt to extract every individual numerical point from a graph unless it is clearly readable.
-12. Do not invent information that cannot be reliably determined from the image or footnote.
-13. Do not provide OCR output alone. Produce a meaningful semantic description.
-14. Make the description sufficiently detailed for RAG retrieval, including important concepts and keywords naturally in Korean.
-15. Do not use Markdown tables.
-16. Return ONLY the Korean description. Do not return JSON, headings, commentary, or explanations about the task.
-
-The description should be several sentences or short paragraphs depending on the complexity of the image."""
+- The first sentence says what the figure shows: the subject, what is being compared or measured, the entities (countries, groups, indicators), the period, and the units.
+- The remaining sentences give the highlights: the clear trends, the largest and smallest values, turning points, differences between series or groups, and anything the caption or footnote singles out.
+- Use the CAPTION and FOOTNOTE for the figure number, units, definitions, and source; fold that information into the sentences rather than quoting the whole footnote.
+- Use the EXTRACTED CONTENT to name values precisely when it agrees with the picture; do not reproduce it as a table or a list.
+- Name the important concepts and keywords in Korean so the summary is useful for semantic search; keep names that are printed in English as they are.
+- Do not invent figures, trends, or sources that the image and the provided text do not support.
+- Return ONLY the Korean paragraph: no Markdown, no headings, no JSON, no commentary about the task."""
 
 
-class ImageDescriptionError(RuntimeError):
-    """The image could not be described."""
+class FigureDescriptionError(RuntimeError):
+    """The figure could not be described."""
 
 
 @dataclass(frozen=True)
-class DescribedImage:
-    """One figure the model described."""
+class DescribedFigure:
+    """One figure the model summarised."""
 
     text: str
     caption: str | None
@@ -95,60 +90,80 @@ def image_name_of(block: dict[str, Any]) -> str | None:
     return name or None
 
 
-def build_user_text(caption: str | None, footnote: str | None) -> str:
-    """The text sent beside the image: what the page said about it.
+def figure_texts(block: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+    """The caption, footnote and parser reading of a figure block.
 
-    The system prompt speaks of an IMAGE FOOTNOTE, so that label is always
-    present, and says so when the page gave none rather than leaving the
-    model to wonder whether something was cut.
+    The caption and footnote live under ``image_caption`` / ``image_footnote``
+    or ``chart_caption`` / ``chart_footnote`` by the block's type; the reading
+    is ``content`` for both, with the parser's Markdown escaping taken off.
     """
-    parts = []
-    if caption:
-        parts.append(f"IMAGE CAPTION:\n{caption}")
-    parts.append(f"IMAGE FOOTNOTE:\n{footnote}" if footnote else "IMAGE FOOTNOTE:\n(none)")
-    return "\n\n".join(parts)
+    kind = block.get("type")
+    caption = join_fragments(block.get(f"{kind}_caption"))
+    footnote = join_fragments(block.get(f"{kind}_footnote"))
+    content = block.get("content")
+    reading = unescape(content) if isinstance(content, str) and content.strip() else None
+    return caption, footnote, reading
 
 
-def describe_image_block(
+def build_user_text(
+    caption: str | None, footnote: str | None, content: str | None = None
+) -> str:
+    """The text sent beside the figure: what the page and the parser said about it.
+
+    Every label the system prompt names is always present, and says so when
+    there is nothing under it, rather than leaving the model to wonder
+    whether something was cut.
+    """
+    return "\n\n".join(
+        [
+            f"CAPTION:\n{caption or '(none)'}",
+            f"FOOTNOTE:\n{footnote or '(none)'}",
+            f"EXTRACTED CONTENT:\n{content or '(none)'}",
+        ]
+    )
+
+
+def describe_figure_block(
     db: Session, document: Document, block: dict[str, Any]
-) -> DescribedImage:
-    """Read one image block's crop from storage and have the model describe it.
+) -> DescribedFigure:
+    """Read one figure block's crop from storage and have the model summarise it.
 
-    Raises ImageDescriptionError when the block names no image, the crop is
+    Raises FigureDescriptionError when the block names no image, the crop is
     not in storage or too large, or the model does not answer with a text.
     """
     name = image_name_of(block)
     if name is None:
-        raise ImageDescriptionError("the block names no image file")
+        raise FigureDescriptionError("the block names no image file")
 
     try:
         image = resolve_image(db, document, name)
     except ArtifactUnavailable as exc:
-        raise ImageDescriptionError(str(exc)) from exc
+        raise FigureDescriptionError(str(exc)) from exc
 
     try:
         raw, oversized = read_object(image.bucket, image.key, max_bytes=MAX_IMAGE_BYTES)
     except ObjectNotFound as exc:
-        raise ImageDescriptionError(f"image missing from storage: {exc}") from exc
+        raise FigureDescriptionError(f"image missing from storage: {exc}") from exc
     if oversized:
-        raise ImageDescriptionError(f"image {name} is larger than {MAX_IMAGE_BYTES} bytes")
+        raise FigureDescriptionError(f"image {name} is larger than {MAX_IMAGE_BYTES} bytes")
     if not raw:
-        raise ImageDescriptionError(f"image {name} is empty in storage")
+        raise FigureDescriptionError(f"image {name} is empty in storage")
 
-    caption = join_fragments(block.get("image_caption"))
-    footnote = join_fragments(block.get("image_footnote"))
+    caption, footnote, reading = figure_texts(block)
 
     try:
         text = chat_vision(
             system=SYSTEM_PROMPT,
             image=raw,
             media_type=image.media_type,
-            text=build_user_text(caption, footnote),
+            text=build_user_text(caption, footnote, reading),
             max_tokens=MAX_DESCRIPTION_TOKENS,
         )
     except LLMError as exc:
-        raise ImageDescriptionError(str(exc)) from exc
+        raise FigureDescriptionError(str(exc)) from exc
+    if not text.strip():
+        raise FigureDescriptionError("the model answered with an empty text")
 
-    return DescribedImage(
+    return DescribedFigure(
         text=text.strip(), caption=caption, footnote=footnote, image_name=name
     )

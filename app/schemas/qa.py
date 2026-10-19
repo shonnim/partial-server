@@ -32,7 +32,10 @@ class QASourceOut(BaseModel):
 
 
 class QAResultOut(BaseModel):
-    """The ``result`` event: the answer and where it came from."""
+    """The ``result`` event: the answer, where it came from, and what to ask next."""
 
     answer: str
     sources: list[QASourceOut]
+    # The 추천질문 box: questions generated from random chunks of the same
+    # document. Empty when generating them failed — the answer still stands.
+    suggested_questions: list[str]

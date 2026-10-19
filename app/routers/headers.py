@@ -12,8 +12,10 @@ from app.services.header_extraction import (
     document_headers,
     extract_headers,
     header_count,
+    parse_index_edits,
     prepare_for_extraction,
     save_headers,
+    update_page_indexes,
 )
 from app.services.header_pages import (
     DEFAULT_END_PAGE,
@@ -245,6 +247,46 @@ def header_manual_submit(
             "roots": document_headers(db, doc.id),
             "saved": saved,
             "total": saved,
+        },
+    )
+
+
+@router.post(
+    "/{document_id}/indexes",
+    response_class=HTMLResponse,
+    name="header_indexes_update",
+)
+def header_indexes_update(
+    request: Request,
+    document_id: uuid.UUID,
+    indexes: str = Form(""),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """Save hand-edited start/end page indexes and re-render the outline.
+
+    A bad payload re-renders the stored values with the message in the dialog
+    rather than as an HTTP error — the caller is the pop-up's Save button, and
+    a 4xx would leave the pop-up blank.
+    """
+    doc = _document_or_404(db, document_id)
+
+    error: str | None = None
+    updated: int | None = None
+    try:
+        updated = update_page_indexes(db, doc.id, parse_index_edits(indexes))
+    except ValueError as exc:
+        error = str(exc)
+
+    return templates.TemplateResponse(
+        request,
+        "headers/_partials/outline_modal.html",
+        {
+            "doc": doc,
+            "roots": document_headers(db, doc.id),
+            "saved": None,
+            "total": header_count(db, doc.id),
+            "updated": updated,
+            "error": error,
         },
     )
 

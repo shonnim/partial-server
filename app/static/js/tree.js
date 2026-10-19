@@ -36,6 +36,14 @@
     return Boolean(list && list.querySelector(".tree-check:disabled"));
   }
 
+  /** Whether this folder still has file rows behind a "load more" button.
+   *  Those rows may be selectable, so nothing can be concluded from the
+   *  loaded page alone while this is true. */
+  function hasUnloaded(node) {
+    const list = childListOf(node);
+    return Boolean(list && list.querySelector(":scope > .tree-more"));
+  }
+
   function setSubtree(node, checked) {
     const list = childListOf(node);
     if (!list) return;
@@ -58,11 +66,30 @@
     if (!box) return;
     if (boxes.length === 0) {
       if (directNodes(node).length === 0) return; // not expanded yet — leave as set
+      // Every loaded row has opted out, but rows still behind "load more"
+      // may be selectable — the folder is only taken out of the selection
+      // once the whole list has been seen.
+      if (hasUnloaded(node)) {
+        if (box.disabled) {
+          box.disabled = false;
+          box.title = "";
+        }
+        box.indeterminate = false;
+        return;
+      }
       box.checked = false;
       box.indeterminate = false;
       box.disabled = true;
       box.title = "Nothing left to select under this folder";
       return;
+    }
+
+    // The opt-out runs both ways: a row coming back into the selection — a
+    // document whose vectors were just deleted, on the Embedding tree —
+    // hands its folder's box back too.
+    if (box.disabled) {
+      box.disabled = false;
+      box.title = "";
     }
 
     const checked = boxes.filter((b) => b.checked).length;
@@ -95,7 +122,9 @@
     const box = boxOf(node);
     if (!box) return 0;
     if (isFile(node)) return selectable(box) && box.checked ? 1 : 0;
-    if (box.indeterminate || (box.checked && hasOptedOut(node))) {
+    // Mirrors collect(): with unloaded rows the whole path is sent, so the
+    // server total is the honest count even though rows have opted out.
+    if (box.indeterminate || (box.checked && hasOptedOut(node) && !hasUnloaded(node))) {
       return directNodes(node).reduce((n, child) => n + pickedCount(child), 0);
     }
     return box.checked ? Number(node.dataset.total || 0) : 0;
@@ -161,8 +190,10 @@
     if (box.checked && !box.indeterminate) {
       // A path is resolved server-side into every document beneath it, which
       // would take back the rows that opted out. Once the browser can see one,
-      // the children are named individually instead.
-      if (!hasOptedOut(node)) {
+      // the children are named individually instead — unless rows are still
+      // behind "load more": those cannot be named, so the path goes after
+      // all, and the server skips the already-done documents itself.
+      if (!hasOptedOut(node) || hasUnloaded(node)) {
         picked.paths.push(node.dataset.path);
         return;
       }
@@ -226,7 +257,10 @@
     if (node) {
       const box = boxOf(node);
       if (box && box.checked) setSubtree(node, true);
-      else refresh(node);
+      // Derived even when the tick was just passed down: a checked folder
+      // whose loaded rows have all opted out must drop to disabled right
+      // here, not on the next click.
+      refresh(node);
       refreshAncestors(node);
     }
     updateCounts();

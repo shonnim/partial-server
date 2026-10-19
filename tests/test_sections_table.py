@@ -53,23 +53,41 @@ def test_html_the_converter_would_reject_is_still_stored() -> None:
     assert tally.tables == 1
 
 
-def test_chart_block_splits_content_caption_and_footnote() -> None:
-    tally = _Tally()
-    row = _row_for(
-        None,
-        None,
-        {
-            "type": "chart",
-            "content": "2016년 성장률은 2.8%로 전망된다.",
-            "chart_caption": ["[그림 1] 성장률 추이", "(단위: %)"],
-            "chart_footnote": ["주: 한국은행 추정치.", "출처: 한국은행."],
-            "page_idx": 3,
-        },
-        tally,
-    )
+def test_chart_block_goes_through_the_vision_model(monkeypatch) -> None:
+    """A chart is summarised like an image: the crop, caption, footnote and
+    the parser's reading go to the model, and its summary is the content."""
+    from app.services import sections
+    from app.services.image_description import DescribedFigure
 
+    seen: list[dict] = []
+
+    def fake_describe(db, document, block):
+        seen.append(block)
+        return DescribedFigure(
+            text="성장률은 2016년 2.8%로 전망된다. 이는 전년보다 낮은 수준이다.",
+            caption="[그림 1] 성장률 추이\n(단위: %)",
+            footnote="주: 한국은행 추정치.\n출처: 한국은행.",
+            image_name="abc.jpg",
+        )
+
+    monkeypatch.setattr(sections, "describe_figure_block", fake_describe)
+
+    tally = _Tally()
+    block = {
+        "type": "chart",
+        "img_path": "images/abc.jpg",
+        "content": "| 연도 | 성장률 |\n| --- | --- |\n| 2016 | 2.8 |",
+        "chart_caption": ["[그림 1] 성장률 추이", "(단위: %)"],
+        "chart_footnote": ["주: 한국은행 추정치.", "출처: 한국은행."],
+        "page_idx": 3,
+    }
+    row = _row_for(None, None, block, tally)
+
+    assert seen == [block]
     assert row is not None
-    assert row.content == "2016년 성장률은 2.8%로 전망된다."
+    assert row.type == "chart"
+    assert row.content == "성장률은 2016년 2.8%로 전망된다. 이는 전년보다 낮은 수준이다."
     assert row.caption == "[그림 1] 성장률 추이\n(단위: %)"
     assert row.footnote == "주: 한국은행 추정치.\n출처: 한국은행."
     assert tally.charts == 1
+    assert tally.images == 0

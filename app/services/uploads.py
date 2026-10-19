@@ -8,8 +8,10 @@ key is already registered, so re-uploading the same file is not a duplicate.
 """
 
 from dataclasses import dataclass
+from io import BytesIO
 
 from fastapi import UploadFile
+from pypdf import PdfReader
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -23,7 +25,7 @@ MAX_UPLOAD_FILES = 100
 
 # One PDF is read fully into memory before it goes to RustFS, so it gets a
 # ceiling. The corpus documents are a few MB each; this is far above them.
-MAX_UPLOAD_BYTES = 400 * 1024 * 1024
+MAX_UPLOAD_BYTES = 500 * 1024 * 1024
 
 PDF_CONTENT_TYPE = "application/pdf"
 _PDF_MAGIC = b"%PDF-"
@@ -44,6 +46,8 @@ class UploadOutcome:
     filename: str
     key: str | None = None
     size_bytes: int = 0
+    # Counted from the uploaded bytes; None when the PDF could not be read.
+    pages: int | None = None
     # True when a Document with this key already existed: its object was
     # replaced and its row refreshed rather than a second row inserted.
     replaced: bool = False
@@ -103,6 +107,31 @@ def build_key(folder_path: str, subpath: str, filename: str) -> str:
     return "/".join(part for part in (folder_path, subpath, filename) if part)
 
 
+def category_of(key: str) -> str | None:
+    """The document's category: the first folder of its object key.
+
+    The corpus is laid out as ``{category}/.../file.pdf``, so the top-level
+    folder is the category. A key with no folder — a file at the bucket
+    root — has none.
+    """
+    first, sep, _ = key.partition("/")
+    return first if sep else None
+
+
+def count_pages(data: bytes) -> int | None:
+    """How many pages the PDF holds, or None when it cannot be read.
+
+    The count is metadata on the row, not an extraction result: a PDF whose
+    structure pypdf cannot walk (encrypted, damaged cross-reference table)
+    still uploads, with the count left unknown the way a never-parsed
+    document's is.
+    """
+    try:
+        return len(PdfReader(BytesIO(data)).pages)
+    except Exception:
+        return None
+
+
 def _read_pdf(upload: UploadFile) -> bytes:
     """Read one upload fully, refusing what is oversized or not a PDF."""
     data = upload.file.read(MAX_UPLOAD_BYTES + 1)
@@ -115,13 +144,23 @@ def _read_pdf(upload: UploadFile) -> bytes:
     return data
 
 
-def _register(db: Session, *, bucket: str, key: str, filename: str, size: int) -> bool:
+def _register(
+    db: Session,
+    *,
+    bucket: str,
+    key: str,
+    filename: str,
+    size: int,
+    pages: int | None,
+) -> bool:
     """Insert the Document row for ``key``, or refresh the one that holds it.
 
     Returns True when the key was already registered. Matching on the key is
     what makes re-uploading idempotent: the same file into the same folder is
-    one Document, not a growing pile of rows over one object.
+    one Document, not a growing pile of rows over one object. The category is
+    the key's top-level folder either way.
     """
+    category = category_of(key)
     existing = db.scalars(
         select(Document).where(Document.bucket == bucket, Document.s3_key == key)
     ).first()
@@ -129,6 +168,11 @@ def _register(db: Session, *, bucket: str, key: str, filename: str, size: int) -
         existing.filename = filename
         existing.size_bytes = size
         existing.content_type = PDF_CONTENT_TYPE
+        existing.category = category
+        # The replacement file may have a different length; only a readable
+        # count overwrites, so a bad read cannot blank a known one.
+        if pages is not None:
+            existing.pages = pages
         return True
 
     db.add(
@@ -138,6 +182,8 @@ def _register(db: Session, *, bucket: str, key: str, filename: str, size: int) -
             filename=filename,
             size_bytes=size,
             content_type=PDF_CONTENT_TYPE,
+            category=category,
+            pages=pages,
         )
     )
     return False
@@ -163,10 +209,16 @@ def upload_pdfs(
         try:
             filename = clean_pdf_filename(upload.filename)
             data = _read_pdf(upload)
+            pages = count_pages(data)
             key = build_key(folder, sub, filename)
             put_object(bucket, key, data, content_type=PDF_CONTENT_TYPE)
             replaced = _register(
-                db, bucket=bucket, key=key, filename=filename, size=len(data)
+                db,
+                bucket=bucket,
+                key=key,
+                filename=filename,
+                size=len(data),
+                pages=pages,
             )
             db.commit()
         except InvalidUploadFile as exc:
@@ -181,7 +233,11 @@ def upload_pdfs(
         else:
             outcomes.append(
                 UploadOutcome(
-                    filename=filename, key=key, size_bytes=len(data), replaced=replaced
+                    filename=filename,
+                    key=key,
+                    size_bytes=len(data),
+                    pages=pages,
+                    replaced=replaced,
                 )
             )
     return outcomes

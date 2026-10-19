@@ -13,15 +13,24 @@ from app.llm import LLMError
 from app.main import app
 from app.models.chunk import Chunk
 from app.models.document import Document
-from app.models.header import HeaderContent
+from app.models.header import Header, HeaderContent
 from app.services.qa import (
     NOT_FOUND_MESSAGE,
     Classification,
+    StoredSummary,
+    chunk_answers,
     classify_query,
+    classify_summary_scope,
+    find_stored_summary,
     generate_answer,
+    generate_summary_answer,
     identify_sources,
+    last_printed_page,
     pick_source_ids,
     printed_page,
+    query_pages_exist,
+    requested_pages,
+    suggest_questions,
 )
 
 DOC_ID = uuid.uuid4()
@@ -55,6 +64,159 @@ def test_classify_rejects_an_unknown_type() -> None:
 
     with pytest.raises(LLMError):
         classify_query("질문", complete_json=fake)
+
+
+# ---- summary routing --------------------------------------------------------------
+
+
+def make_header(hid: int, header: str, *, level: int = 1, conclusion: str | None = None) -> Header:
+    return Header(id=hid, doc_id=DOC_ID, header=header, level=level, conclusion=conclusion)
+
+
+def test_classify_summary_scope_lists_the_outline_and_returns_the_pick() -> None:
+    seen: dict[str, Any] = {}
+
+    def fake(**kwargs: Any) -> dict:
+        seen.update(kwargs)
+        return {"scope": "section", "header_id": 2}
+
+    got = classify_summary_scope(
+        "서론을 요약해줘",
+        [(1, 1, "Ⅰ. 서론"), (2, 2, "1. 배경")],
+        complete_json=fake,
+    )
+
+    assert seen["schema_name"] == "summary_scope"
+    assert "서론을 요약해줘" in seen["user"]
+    assert "[id 1] Ⅰ. 서론" in seen["user"]
+    assert "[id 2]   1. 배경" in seen["user"]
+    assert got.scope == "section"
+    assert got.header_id == 2
+
+
+def test_classify_summary_scope_drops_an_unknown_header_id() -> None:
+    def fake(**kwargs: Any) -> dict:
+        return {"scope": "section", "header_id": 99}
+
+    got = classify_summary_scope("서론 요약", [(1, 1, "서론")], complete_json=fake)
+    assert got.header_id is None
+
+
+def test_classify_summary_scope_rejects_an_unknown_scope() -> None:
+    def fake(**kwargs: Any) -> dict:
+        return {"scope": "paragraph", "header_id": None}
+
+    with pytest.raises(LLMError):
+        classify_summary_scope("요약해줘", [], complete_json=fake)
+
+
+def test_find_stored_summary_serves_the_document_summary() -> None:
+    doc = make_document()
+    doc.summary = "  **전체** 요약임  "
+
+    got = find_stored_summary(
+        StubDb(doc),
+        doc,
+        "이 보고서 요약해줘",
+        complete_json=lambda **k: {"scope": "document", "header_id": None},
+        load_headers=lambda db, doc_id: [make_header(1, "서론", conclusion="서론 요약임")],
+    )
+
+    assert got == StoredSummary(text="**전체** 요약임", section=None)
+
+
+def test_find_stored_summary_serves_the_sections_conclusion() -> None:
+    doc = make_document()
+    headers = [
+        make_header(1, "Ⅰ. 서론", conclusion="서론 요약임"),
+        make_header(2, " Ⅱ. 재정전망 ", level=1, conclusion="  **재정** 전망 요약임  "),
+    ]
+
+    got = find_stored_summary(
+        StubDb(doc),
+        doc,
+        "재정전망 부분 요약해줘",
+        complete_json=lambda **k: {"scope": "section", "header_id": 2},
+        load_headers=lambda db, doc_id: headers,
+    )
+
+    assert got == StoredSummary(text="**재정** 전망 요약임", section="Ⅱ. 재정전망")
+
+
+def test_find_stored_summary_without_anything_stored_asks_no_model() -> None:
+    def explode(**kwargs: Any) -> dict:
+        raise AssertionError("the model must not be called")
+
+    got = find_stored_summary(
+        StubDb(make_document()),
+        make_document(),
+        "요약해줘",
+        complete_json=explode,
+        load_headers=lambda db, doc_id: [],
+    )
+    assert got is None
+
+
+def test_find_stored_summary_falls_through_when_nothing_matches() -> None:
+    doc = make_document()
+    doc.summary = "전체 요약임"
+    headers = [make_header(1, "서론", conclusion=None)]
+
+    # The scope resolves to a section, but no listed header matches.
+    assert (
+        find_stored_summary(
+            doc_stub := StubDb(doc),
+            doc,
+            "결론 요약해줘",
+            complete_json=lambda **k: {"scope": "section", "header_id": None},
+            load_headers=lambda db, doc_id: headers,
+        )
+        is None
+    )
+    # The matched header carries no conclusion yet.
+    assert (
+        find_stored_summary(
+            doc_stub,
+            doc,
+            "서론 요약해줘",
+            complete_json=lambda **k: {"scope": "section", "header_id": 1},
+            load_headers=lambda db, doc_id: headers,
+        )
+        is None
+    )
+    # The whole document is asked for, but its summary is not written yet.
+    doc.summary = None
+    assert (
+        find_stored_summary(
+            doc_stub,
+            doc,
+            "요약해줘",
+            complete_json=lambda **k: {"scope": "document", "header_id": None},
+            load_headers=lambda db, doc_id: headers,
+        )
+        is None
+    )
+
+
+def test_generate_summary_answer_carries_query_heading_and_summary() -> None:
+    def fake(**kwargs: Any) -> str:
+        assert "서론을 요약해줘" in kwargs["user"]
+        assert "SECTION HEADING:\nⅠ. 서론" in kwargs["user"]
+        assert "서론 요약임" in kwargs["user"]
+        return "  서론을 요약하면 다음과 같습니다.  "
+
+    got = generate_summary_answer(
+        "서론을 요약해줘", "서론 요약임", section="Ⅰ. 서론", complete=fake
+    )
+    assert got == "서론을 요약하면 다음과 같습니다."
+
+
+def test_generate_summary_answer_for_the_document_names_no_section() -> None:
+    def fake(**kwargs: Any) -> str:
+        assert "SECTION HEADING" not in kwargs["user"]
+        return "답변"
+
+    assert generate_summary_answer("요약해줘", "전체 요약임", complete=fake) == "답변"
 
 
 # ---- the answer -------------------------------------------------------------------
@@ -223,6 +385,112 @@ def test_identify_sources_survives_a_missing_content_list() -> None:
     assert got[0].page is None
 
 
+# ---- suggested questions ----------------------------------------------------------
+
+
+def test_suggest_questions_reads_the_chunks_and_cleans_the_reply() -> None:
+    chunks = [make_chunk([]), make_chunk([])]
+    seen: dict[str, str] = {}
+
+    def fake(**kwargs: Any) -> dict:
+        seen["user"] = kwargs["user"]
+        return {"questions": ["  세출은 얼마나 늘었나요?  ", "세출은 얼마나 늘었나요?", "", "부채 원인은 무엇인가요?"]}
+
+    got = suggest_questions(StubDb(None, chunks), DOC_ID, complete_json=fake)
+
+    # The chunk text reaches the prompt; blanks and repeats are dropped.
+    assert "본문" in seen["user"]
+    assert got == ["세출은 얼마나 늘었나요?", "부채 원인은 무엇인가요?"]
+
+
+def test_suggest_questions_without_chunks_asks_no_model() -> None:
+    def explode(**kwargs: Any) -> dict:
+        raise AssertionError("the model must not be called")
+
+    assert suggest_questions(StubDb(None, []), DOC_ID, complete_json=explode) == []
+
+
+def test_a_failed_suggestion_call_costs_only_the_box() -> None:
+    def fail(**kwargs: Any) -> dict:
+        raise LLMError("model down")
+
+    assert suggest_questions(StubDb(None, [make_chunk([])]), DOC_ID, complete_json=fail) == []
+
+
+# ---- page validation --------------------------------------------------------------
+
+
+def test_requested_pages_reads_korean_and_latin_forms() -> None:
+    assert requested_pages("99페이지의 2022년 수치를 설명해줘") == [99]
+    assert requested_pages("12쪽과 page 12를 비교해줘") == [12]
+    assert requested_pages("3 페이지와 p.7의 내용은?") == [3, 7]
+    assert requested_pages("세출 추이가 궁금해요") == []
+
+
+def test_last_printed_page_reads_the_last_numbered_block() -> None:
+    blocks = [
+        {"type": "text", "text": "본문 2024"},
+        {"type": "page_number", "text": "- 97 -"},
+        # A two-up parse prints the spread's both numbers on one parse page.
+        {"type": "page_number", "text": "98 99"},
+        # A trailing block without digits does not hide the numbered ones.
+        {"type": "page_number", "text": "끝"},
+    ]
+    assert last_printed_page(blocks) == 99
+    assert last_printed_page(None) is None
+    assert last_printed_page([{"type": "text", "text": "1"}]) is None
+
+
+def test_a_page_beyond_the_document_fails_validation() -> None:
+    blocks = [{"type": "page_number", "text": "99"}]
+    fake = lambda db, doc: (blocks, None)  # noqa: E731
+
+    assert not query_pages_exist(
+        StubDb(None), make_document(), "100페이지를 요약해줘", load_blocks=fake
+    )
+    assert query_pages_exist(
+        StubDb(None), make_document(), "99페이지를 요약해줘", load_blocks=fake
+    )
+
+
+def test_a_query_without_a_page_skips_the_content_list() -> None:
+    def explode(db: Any, doc: Any) -> tuple[Any, str | None]:
+        raise AssertionError("the content list must not be loaded")
+
+    assert query_pages_exist(
+        StubDb(None), make_document(), "세출 추이를 분석해줘", load_blocks=explode
+    )
+
+
+def test_a_missing_content_list_does_not_refuse_the_query() -> None:
+    fake = lambda db, doc: (None, "content list missing from storage")  # noqa: E731
+
+    assert query_pages_exist(
+        StubDb(None), make_document(), "500페이지 내용 알려줘", load_blocks=fake
+    )
+
+
+# ---- chunk verification -----------------------------------------------------------
+
+
+def test_chunk_answers_returns_the_models_verdict() -> None:
+    seen: dict[str, Any] = {}
+
+    def fake(**kwargs: Any) -> dict:
+        seen.update(kwargs)
+        return {"answerable": False}
+
+    assert chunk_answers("세출은 얼마나 늘었나요?", "세입은 줄었다", complete_json=fake) is False
+    assert seen["schema_name"] == "chunk_verification"
+    assert "세출은 얼마나 늘었나요?" in seen["user"]
+    assert "세입은 줄었다" in seen["user"]
+
+
+def test_chunk_answers_rejects_a_reply_without_the_boolean() -> None:
+    with pytest.raises(LLMError):
+        chunk_answers("질문", "본문", complete_json=lambda **k: {"answerable": "yes"})
+
+
 # ---- the route --------------------------------------------------------------------
 
 
@@ -290,5 +558,124 @@ def test_an_unclear_query_stops_after_the_first_step(
                 "status": "completed",
             },
         ),
-        ("result", {"answer": NOT_FOUND_MESSAGE, "sources": []}),
+        ("result", {"answer": NOT_FOUND_MESSAGE, "sources": [], "suggested_questions": []}),
     ]
+
+
+class StubSessionLocal:
+    def __enter__(self) -> StubDb:
+        return StubDb(make_document())
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+
+def test_a_summary_query_is_answered_from_the_stored_summary(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.routers.client.SessionLocal", StubSessionLocal)
+    monkeypatch.setattr(
+        "app.routers.client.classify_query",
+        lambda query: Classification(query_type="summary", search_query=query),
+    )
+    monkeypatch.setattr(
+        "app.routers.client.find_stored_summary",
+        lambda db, document, query: StoredSummary(text="**전체** 요약임", section=None),
+    )
+    monkeypatch.setattr(
+        "app.routers.client.generate_summary_answer",
+        lambda query, summary, section=None: "전체 내용을 요약하면 다음과 같습니다.",
+    )
+    monkeypatch.setattr(
+        "app.routers.client.suggest_questions", lambda db, doc_id: ["세출은 얼마나 늘었나요?"]
+    )
+
+    def explode(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("retrieval must not run for a stored summary")
+
+    monkeypatch.setattr("app.routers.client.retrieve_chunk", explode)
+
+    response = client.post(f"/document/{DOC_ID}/ask", json={"query": "이 보고서 요약해줘"})
+
+    assert response.status_code == 200
+    events = sse_events(response.text)
+    assert [name for name, _ in events] == ["progress"] * 6 + ["result"]
+    assert [(d["step"], d["status"]) for _, d in events[:-1]] == [
+        ("question-checking", "running"),
+        ("question-checking", "completed"),
+        ("context-finding", "running"),
+        ("context-finding", "completed"),
+        ("generating", "running"),
+        ("generating", "completed"),
+    ]
+    assert events[-1][1] == {
+        "answer": "전체 내용을 요약하면 다음과 같습니다.",
+        "sources": [],
+        "suggested_questions": ["세출은 얼마나 늘었나요?"],
+    }
+
+
+def test_a_summary_query_without_a_stored_summary_falls_through_to_retrieval(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.routers.client.SessionLocal", StubSessionLocal)
+    monkeypatch.setattr(
+        "app.routers.client.classify_query",
+        lambda query: Classification(query_type="summary", search_query=query),
+    )
+    monkeypatch.setattr(
+        "app.routers.client.find_stored_summary", lambda db, document, query: None
+    )
+    # Nothing of the document is embedded: the body pipeline ends not-found.
+    monkeypatch.setattr(
+        "app.routers.client.retrieve_chunk", lambda db, *, doc_id, query: None
+    )
+
+    response = client.post(f"/document/{DOC_ID}/ask", json={"query": "결론 요약해줘"})
+
+    assert response.status_code == 200
+    events = sse_events(response.text)
+    assert [(d["step"], d["status"]) for name, d in events if name == "progress"] == [
+        ("question-checking", "running"),
+        ("question-checking", "completed"),
+        ("context-finding", "running"),
+        ("context-finding", "completed"),
+    ]
+    assert events[-1] == (
+        "result",
+        {"answer": NOT_FOUND_MESSAGE, "sources": [], "suggested_questions": []},
+    )
+
+
+def test_a_page_beyond_the_document_stops_before_any_model_call(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class StubSessionLocal:
+        def __enter__(self) -> StubDb:
+            return StubDb(make_document())
+
+        def __exit__(self, *exc: object) -> bool:
+            return False
+
+    monkeypatch.setattr("app.routers.client.SessionLocal", StubSessionLocal)
+    monkeypatch.setattr(
+        "app.routers.client.query_pages_exist", lambda db, document, query: False
+    )
+
+    def explode(query: str) -> Classification:
+        raise AssertionError("classification must not run for a refused page")
+
+    monkeypatch.setattr("app.routers.client.classify_query", explode)
+
+    response = client.post(
+        f"/document/{DOC_ID}/ask", json={"query": "500페이지 내용을 설명해줘"}
+    )
+
+    assert response.status_code == 200
+    events = sse_events(response.text)
+    assert [name for name, _ in events] == ["progress", "progress", "result"]
+    assert events[-1][1] == {
+        "answer": NOT_FOUND_MESSAGE,
+        "sources": [],
+        "suggested_questions": [],
+    }

@@ -17,6 +17,7 @@
         {% if o.ok %}
           <span class="pill ok">✓</span>
           <span class="upload-name" title="{{ o.key }}">{{ o.filename }}</span>
+          <span class="pill total">{{ o.pages if o.pages is not none else '—' }} p</span>
           <span class="pill total">{{ o.size_bytes|filesize }}</span>
           {% if o.replaced %}
             <span class="pill warn" title="This key was already registered; the stored file was replaced and the row refreshed.">replaced</span>

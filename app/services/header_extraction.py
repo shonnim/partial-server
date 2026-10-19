@@ -12,12 +12,13 @@ is a correction of the previous attempt, not an addition to it.
 """
 
 import enum
+import json
 import re
 import unicodedata
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, NamedTuple
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -350,14 +351,20 @@ def page_index_ranges(
     ``blocks`` is a document's content list. Both ends are read from it:
 
     * **start** is the ``page_idx`` of the body block that is the entry's
-      heading (see ``locate_heading``). When the entry has a printed
-      ``start_page``, the page that number was printed on must agree, or the
-      start is left unknown rather than trusted.
+      heading (see ``locate_heading``). The entry's printed ``start_page`` is
+      a cross-check, not a requirement: when the page that number was printed
+      on disagrees, the start is left unknown rather than trusted, but a
+      number the content list never captured has nothing to disagree with and
+      the located heading stands on its own. A heading that cannot be located
+      at all falls back to the page its printed number sits on — the content
+      list knows the page even when the heading's text does not match.
     * **end** looks at the next entry at the same level or shallower — the
       next section for a section, the next chapter for a chapter's last
       section. If that heading opens its page the entry ends on the page
       before; if it shares the page with what came before, the entry runs onto
-      that page too. The last entry at its level runs to the last page.
+      that page too — as it also does when the following start is known only
+      from its printed number, where opening the page cannot be checked. The
+      last entry at its level runs to the last page.
     """
     if not isinstance(blocks, list):
         return [(None, None)] * len(headers)
@@ -370,10 +377,15 @@ def page_index_ranges(
 
     starts: list[int | None] = []
     for entry, heading in zip(headers, located, strict=True):
-        if heading is None:
-            starts.append(None)
-        elif entry.start_page is None or printed.get(entry.start_page) == heading.page:
-            starts.append(heading.page)
+        promised = printed.get(entry.start_page) if entry.start_page is not None else None
+        if heading is not None:
+            agrees = promised is None or promised == heading.page
+            starts.append(heading.page if agrees else None)
+        elif promised is not None and (contents is None or promised > contents):
+            # The > contents guard keeps a duplicated printed number — front
+            # matter restarting at 1 — from dragging a body section before
+            # the contents page.
+            starts.append(promised)
         else:
             starts.append(None)
 
@@ -383,11 +395,14 @@ def page_index_ranges(
             (j for j in range(i + 1, len(headers)) if headers[j].level <= entry.level),
             None,
         )
+        heading = located[following] if following is not None else None
         if following is None:
             end = last
-        elif starts[following] is None or located[following] is None:
+        elif starts[following] is None:
             end = None
-        elif starts_page(blocks, located[following]):
+        elif heading is None or heading.page != starts[following]:
+            end = starts[following]
+        elif starts_page(blocks, heading):
             end = starts[following] - 1
         else:
             end = starts[following]
@@ -476,6 +491,110 @@ def header_count(db: Session, doc_id: uuid.UUID) -> int:
         )
         or 0
     )
+
+
+# ---- hand-editing the stored page indexes -----------------------------------
+
+
+def _edited_index(value: Any) -> int | None:
+    """One box of the Edit form: a whole page index, or None for an empty box."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("A page index must be a whole number.")
+    if value < 0:
+        raise ValueError("A page index cannot be negative.")
+    return value
+
+
+class IndexEdit(NamedTuple):
+    """One row of the Edit form: the printed page and both page indexes."""
+
+    page: int | None
+    start: int | None
+    end: int | None
+    #: False when the payload carried no "page" key at all — a browser still
+    #: running the serialiser from before the page box existed. Saving such a
+    #: payload must leave start_page alone rather than clear it.
+    touch_page: bool = True
+
+
+def parse_index_edits(raw: str) -> dict[int, IndexEdit]:
+    """The Edit form's payload: header id → (start_page, start/end page_idx).
+
+    ``raw`` is the JSON the outline pop-up serialises, shaped like
+    ``{"12": {"page": 5, "start": 3, "end": 7}}`` with null for a box left
+    empty. Anything that is not a whole page number — a negative number, a
+    fraction, an end index before its start — raises ValueError with a message
+    fit for the dialog.
+    """
+    unreadable = ValueError("The edited indexes could not be read.")
+
+    try:
+        data = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError as exc:
+        raise unreadable from exc
+    if not isinstance(data, dict):
+        raise unreadable
+
+    edits: dict[int, IndexEdit] = {}
+    for key, value in data.items():
+        try:
+            header_id = int(key)
+        except (TypeError, ValueError):
+            raise unreadable from None
+        if not isinstance(value, dict):
+            raise unreadable
+
+        page = _edited_index(value.get("page"))
+        start = _edited_index(value.get("start"))
+        end = _edited_index(value.get("end"))
+        if start is not None and end is not None and end < start:
+            raise ValueError("An end index cannot be before its start.")
+        edits[header_id] = IndexEdit(page, start, end, touch_page="page" in value)
+
+    return edits
+
+
+def update_page_indexes(
+    db: Session,
+    doc_id: uuid.UUID,
+    edits: dict[int, IndexEdit],
+) -> int:
+    """Overwrite the edited headers' page fields; returns how many changed.
+
+    Scoped to one document, so an id belonging to another document's outline
+    cannot be reached. An id that no longer exists is skipped rather than an
+    error — the outline on screen can be older than the table behind it.
+    """
+    if not edits:
+        return 0
+
+    rows = db.scalars(
+        select(Header).where(Header.doc_id == doc_id, Header.id.in_(edits))
+    ).all()
+
+    changed = 0
+    for row in rows:
+        edit = edits.get(row.id)
+        if edit is None:
+            continue
+        page = edit.page if edit.touch_page else row.start_page
+        if (row.start_page, row.start_page_idx, row.end_page_idx) == (
+            page,
+            edit.start,
+            edit.end,
+        ):
+            continue
+        row.start_page, row.start_page_idx, row.end_page_idx = (
+            page,
+            edit.start,
+            edit.end,
+        )
+        changed += 1
+
+    db.commit()
+    return changed
 
 
 # ---- the gate in front of extraction ---------------------------------------

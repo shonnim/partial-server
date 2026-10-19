@@ -11,8 +11,14 @@
 {% for folder in level.folders %}
   <li class="tree-node" data-path="{{ folder.path }}" data-total="{{ folder.total }}">
     <div class="tree-row">
+      {% set fs = fstats.get(folder.name) %}
+      {#- A folder whose documents are all embedded already has nothing a
+          tick could take, so its box starts disabled, before it is opened —
+          tree.js keeps that honest as runs finish and vectors are deleted. -#}
       <input type="checkbox" class="tree-check" data-kind="folder"
-             aria-label="Select folder {{ folder.name }}">
+             aria-label="Select folder {{ folder.name }}"
+             {% if fs and fs.done == folder.total %}disabled
+             title="All {{ folder.total }} document{{ '' if folder.total == 1 else 's' }} already embedded"{% endif %}>
       <button type="button" class="tree-label" aria-expanded="false"
               hx-get="{{ url_for('embedding_nodes') }}?path={{ folder.path|urlencode }}"
               hx-target="next .tree-children"
@@ -24,7 +30,6 @@
         <span class="tree-name" title="{{ folder.path }}">{{ folder.name }}</span>
       </button>
       <span class="tree-badges">
-        {% set fs = fstats.get(folder.name) %}
         {% if fs and fs.done %}
           <span class="pill ok" title="{{ fs.done }} of {{ folder.total }} fully embedded">🧲 {{ fs.done }}</span>
         {% endif %}

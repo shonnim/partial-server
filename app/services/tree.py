@@ -24,7 +24,7 @@ from app.models.document import DocumentStatus, HasHeader
 from app.schemas.header import TreeSelection
 
 # Files listed per folder before the UI has to ask for more.
-DEFAULT_FILE_PAGE = 50
+DEFAULT_FILE_PAGE = 100
 
 # Everything in an object key before the last slash. A key with no slash is a
 # document at the root of the bucket and has no folder at all.

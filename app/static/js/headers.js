@@ -265,6 +265,47 @@
     input.focus();
   });
 
+  // ---- the outline pop-up's index editor -----------------------------------
+
+  /** The edited printed page and start/end page indexes, for the Save button.
+   *
+   *  Keyed by header id; an emptied box becomes null, which the server stores
+   *  as NULL. Read from the open dialog — there is only ever one.
+   */
+  window.headerIndexEdits = () => {
+    const edits = {};
+    document.querySelectorAll("#modal dialog [data-header-id]").forEach((row) => {
+      const read = (selector) => {
+        const input = row.querySelector(selector);
+        const value = input ? input.value.trim() : "";
+        return value === "" ? null : Number(value);
+      };
+      edits[row.dataset.headerId] = {
+        page: read("[data-page-start]"),
+        start: read("[data-idx-start]"),
+        end: read("[data-idx-end]"),
+      };
+    });
+    return JSON.stringify(edits);
+  };
+
+  document.addEventListener("click", (event) => {
+    const dialog = event.target.closest("dialog");
+    if (!dialog) return;
+
+    if (event.target.closest("[data-edit-indexes]")) {
+      dialog.classList.add("is-editing");
+      const first = dialog.querySelector("[data-page-start]");
+      if (first) first.focus();
+    } else if (event.target.closest("[data-cancel-indexes]")) {
+      dialog.classList.remove("is-editing");
+      // Back out whatever was typed: the boxes return to the stored values.
+      dialog.querySelectorAll(".idx-input").forEach((input) => {
+        input.value = input.defaultValue;
+      });
+    }
+  });
+
   document.body.addEventListener("htmx:afterSwap", (event) => {
     const target = event.detail.target;
 
