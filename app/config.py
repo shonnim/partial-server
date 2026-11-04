@@ -41,6 +41,14 @@ class Settings(BaseSettings):
     vlm_model: str = Field(default="qwen2.5-vl-7b-instruct", alias="VLM_MODEL")
     vlm_timeout_seconds: float = Field(default=180.0, alias="VLM_TIMEOUT_SECONDS")
 
+    # The Upstage Solar chat model, selectable on the Summarizing page beside
+    # the self-hosted text model. Chat lives on the same Upstage API as the
+    # embeddings and authenticates with the same key (upstage_api_key below).
+    solar_base_url: str = Field(
+        default="https://api.upstage.ai/v1", alias="SOLAR_BASE_URL"
+    )
+    solar_model: str = Field(default="solar-pro4", alias="SOLAR_MODEL")
+
     # The Upstage embedding API the Embedding page sends chunk text to. The
     # key stays on the backend: it is never rendered into a template, never
     # logged, and never sent anywhere but this URL.

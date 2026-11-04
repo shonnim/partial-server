@@ -11,9 +11,11 @@
   <div class="card check-result is-error">{{ error }}</div>
 {% else %}
   <div class="card check-result" data-run="summarizing"
-       data-force="{{ '1' if force else '' }}" data-general="{{ '1' if general else '' }}">
+       data-force="{{ '1' if force else '' }}" data-general="{{ '1' if general else '' }}"
+       data-llm="{{ llm or '' }}">
     <div class="run-strip" data-run-strip>
       <span class="pill ok">✓ {{ queue.eligible|length }} to summarize</span>
+      {% if llm_label %}<span class="pill total" title="the model every summary of this run is written with">🧠 {{ llm_label }}</span>{% endif %}
       {% if general %}<span class="pill total" title="only the document summary is written, from the stored header summaries">general only</span>{% endif %}
       {% if force %}<span class="pill warn" title="{{ 'the document summary is rewritten' if general else 'every header is re-summarized' }}">force</span>{% endif %}
       {% if queue.skipped %}
@@ -21,6 +23,7 @@
       {% endif %}
       {% if queue.eligible %}
         <span class="pill total" data-run-state>⏳ starting</span>
+        <span class="pill total" data-run-elapsed title="elapsed time of the whole run">⏱ 0s</span>
         <span class="toolbar-spacer"></span>
         <button type="button" class="btn ghost" data-run-stop>■ Stop</button>
       {% else %}

@@ -41,6 +41,13 @@
               hx-target="#summarize-result"
               hx-swap="innerHTML"
               hx-indicator="#summarize-spinner">
+          <label class="group-label" for="summarize-llm">LLM</label>
+          <select class="group-input" id="summarize-llm" name="llm">
+            {% for key, label in llms.items() %}
+              <option value="{{ key }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+
           <dl class="stat-grid chunk-stats">
             <div class="stat-cell" data-stat="selected"><dt>Selected documents</dt><dd id="summarize-selected">0</dd></div>
           </dl>

@@ -1,3 +1,17 @@
-from app.llm.client import LLMError, chat_json, chat_text, chat_vision
+from app.llm.client import (
+    LLMError,
+    TokenUsage,
+    chat_json,
+    chat_text,
+    chat_text_usage,
+    chat_vision,
+)
 
-__all__ = ["LLMError", "chat_json", "chat_text", "chat_vision"]
+__all__ = [
+    "LLMError",
+    "TokenUsage",
+    "chat_json",
+    "chat_text",
+    "chat_text_usage",
+    "chat_vision",
+]

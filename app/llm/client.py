@@ -15,6 +15,7 @@ click the button again.
 
 import base64
 import json
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -26,10 +27,26 @@ class LLMError(RuntimeError):
     """The model could not be reached, or did not answer usefully."""
 
 
+@dataclass(frozen=True)
+class TokenUsage:
+    """What one completion cost, as the server's ``usage`` object reports it.
+
+    Display only — nothing in this project stores it. Zeros when the server
+    sent no usage.
+    """
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
+
 def _complete(
     payload: dict[str, Any], *, base_url: str, api_key: str, timeout: float
-) -> str:
-    """POST one chat completion and return the reply's text content.
+) -> tuple[str, TokenUsage]:
+    """POST one chat completion and return the reply's text and token usage.
 
     Raises LLMError for a transport failure, a non-200 status, a reply of an
     unexpected shape, or an empty reply.
@@ -54,14 +71,22 @@ def _complete(
         raise LLMError(f"model returned HTTP {response.status_code}: {response.text[:300]}")
 
     try:
-        content = response.json()["choices"][0]["message"]["content"]
+        body = response.json()
+        content = body["choices"][0]["message"]["content"]
     except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
         raise LLMError(f"unexpected reply shape from the model: {exc}") from exc
 
     if not isinstance(content, str) or not content.strip():
         raise LLMError("the model returned an empty reply")
 
-    return content
+    raw = body.get("usage") if isinstance(body, dict) else None
+    raw = raw if isinstance(raw, dict) else {}
+
+    def _count(key: str) -> int:
+        value = raw.get(key)
+        return value if isinstance(value, int) and value >= 0 else 0
+
+    return content, TokenUsage(_count("prompt_tokens"), _count("completion_tokens"))
 
 
 def chat_json(
@@ -96,7 +121,7 @@ def chat_json(
         },
     }
 
-    content = _complete(
+    content, _ = _complete(
         payload,
         base_url=settings.llm_base_url,
         api_key=settings.llm_api_key,
@@ -121,16 +146,47 @@ def chat_text(
     max_tokens: int = 1024,
     temperature: float = 0.0,
     timeout_seconds: float | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
 ) -> str:
-    """One chat completion on the text model, answered as free text.
+    """One chat completion answered as free text.
 
-    Returns the reply's text. Raises LLMError for anything else.
+    By default the configured text model answers; ``base_url``, ``api_key``
+    and ``model`` point the same call at another OpenAI-compatible endpoint
+    (the Summarizing page's model picker). Returns the reply's text. Raises
+    LLMError for anything else.
     """
+    text, _ = chat_text_usage(
+        system=system,
+        user=user,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        timeout_seconds=timeout_seconds,
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+    )
+    return text
+
+
+def chat_text_usage(
+    *,
+    system: str,
+    user: str,
+    max_tokens: int = 1024,
+    temperature: float = 0.0,
+    timeout_seconds: float | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+) -> tuple[str, TokenUsage]:
+    """``chat_text``, also returning what the call cost in tokens."""
     settings = get_settings()
     timeout = timeout_seconds if timeout_seconds is not None else settings.llm_timeout_seconds
 
     payload = {
-        "model": settings.llm_model,
+        "model": model or settings.llm_model,
         "temperature": temperature,
         "max_tokens": max_tokens,
         "messages": [
@@ -141,8 +197,8 @@ def chat_text(
 
     return _complete(
         payload,
-        base_url=settings.llm_base_url,
-        api_key=settings.llm_api_key,
+        base_url=base_url or settings.llm_base_url,
+        api_key=api_key or settings.llm_api_key,
         timeout=timeout,
     )
 
@@ -183,9 +239,10 @@ def chat_vision(
         ],
     }
 
-    return _complete(
+    content, _ = _complete(
         payload,
         base_url=settings.vlm_base_url,
         api_key=settings.vlm_api_key or settings.llm_api_key,
         timeout=timeout,
     )
+    return content

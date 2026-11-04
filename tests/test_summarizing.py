@@ -7,6 +7,7 @@ behaviour and the prompt plumbing are exercised directly.
 
 import pytest
 
+from app.llm import TokenUsage
 from app.models.header import Header, HeaderContent
 from app.services import summarizing
 from app.services.summarizing import (
@@ -26,14 +27,44 @@ class FakeModel:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def __call__(self, system: str, user: str) -> str:
+    def __call__(self, system: str, user: str) -> tuple[str, TokenUsage]:
         self.calls.append((system, user))
-        return f"요약 {len(self.calls)}"
+        # A fixed usage per call, so tally tests can count calls off it.
+        return f"요약 {len(self.calls)}", TokenUsage(prompt_tokens=100, completion_tokens=10)
 
 
 def summarizer_of(model: FakeModel) -> Summarizer:
     # Tokens counted as characters, so budgets in tests are character counts.
     return Summarizer(complete=model, count_tokens=len)
+
+
+# ---- the model picker ---------------------------------------------------------------
+
+
+def test_resolve_llm_falls_back_to_the_default() -> None:
+    assert summarizing.resolve_llm("gemma") == "gemma"
+    assert summarizing.resolve_llm("solar") == "solar"
+    assert summarizing.resolve_llm("gpt-5") == summarizing.DEFAULT_LLM
+    assert summarizing.resolve_llm(None) == summarizing.DEFAULT_LLM
+    assert summarizing.resolve_llm("") == summarizing.DEFAULT_LLM
+
+
+def test_make_summarizer_binds_the_picked_model() -> None:
+    assert summarizing.make_summarizer("gemma").complete is summarizing._chat
+    assert summarizing.make_summarizer("solar").complete is summarizing._chat_solar
+    # An unknown value never picks a model by accident.
+    assert summarizing.make_summarizer("anything").complete is summarizing._chat
+
+
+def test_summarizer_tallies_the_usage_of_every_call() -> None:
+    model = FakeModel()
+    summarizer = summarizer_of(model)
+    summarizer.summarize_unit("1. 세계 채무 현황", ["본문 한 덩어리"])
+    summarizer.summarize_parent("I. 부", [("1. 장", "요약")])
+
+    assert len(model.calls) == 2
+    assert summarizer.prompt_tokens == 200
+    assert summarizer.completion_tokens == 20
 
 
 # ---- one unit ---------------------------------------------------------------------

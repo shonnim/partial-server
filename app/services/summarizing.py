@@ -35,7 +35,8 @@ from dataclasses import dataclass, field
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app.llm import LLMError, chat_text
+from app.config import get_settings
+from app.llm import LLMError, TokenUsage, chat_text_usage
 from app.models.document import Document
 from app.models.header import Header, HeaderContent
 from app.services.html_table import (
@@ -119,8 +120,40 @@ Write a general summary of the whole document in Korean, formatted as Markdown: 
 - Return ONLY the Korean summary (the paragraph and the list): no headings, no code fences, no JSON, no commentary about the task."""
 
 
-def _chat(system: str, user: str) -> str:
-    return chat_text(system=system, user=user, max_tokens=MAX_SUMMARY_TOKENS)
+# The models the page's picker offers, in the order the box lists them.
+# The first is the default: the self-hosted text model everything else uses.
+SUMMARY_LLMS: dict[str, str] = {
+    "gemma": "Gemma 4 (local)",
+    "solar": "Solar Pro 4 (Upstage)",
+}
+DEFAULT_LLM = "gemma"
+
+
+def resolve_llm(llm: str | None) -> str:
+    """The picker's value, or the default for anything it does not offer."""
+    return llm if llm in SUMMARY_LLMS else DEFAULT_LLM
+
+
+def _chat(system: str, user: str) -> tuple[str, TokenUsage]:
+    return chat_text_usage(system=system, user=user, max_tokens=MAX_SUMMARY_TOKENS)
+
+
+def _chat_solar(system: str, user: str) -> tuple[str, TokenUsage]:
+    # Solar chat lives on the Upstage API beside the embeddings, same key.
+    settings = get_settings()
+    return chat_text_usage(
+        system=system,
+        user=user,
+        max_tokens=MAX_SUMMARY_TOKENS,
+        base_url=settings.solar_base_url,
+        api_key=settings.upstage_api_key,
+        model=settings.solar_model,
+    )
+
+
+def make_summarizer(llm: str | None) -> "Summarizer":
+    """A summarizer bound to the picker's model; unknown values mean the default."""
+    return Summarizer(complete=_chat_solar if resolve_llm(llm) == "solar" else _chat)
 
 
 # ---- building the text a header is summarised from ------------------------------
@@ -182,36 +215,48 @@ class UnitSummary:
 class Summarizer:
     """Summaries for one header's worth of text, split and merged as needed.
 
-    ``complete`` is the model call — (system, user) to reply text — and is
-    injectable so the logic can be exercised without a model; so is the
-    token counter, the same way the chunker takes one.
+    ``complete`` is the model call — (system, user) to the reply text and its
+    token usage — and is injectable so the logic can be exercised without a
+    model; so is the token counter, the same way the chunker takes one.
+
+    The instance tallies the usage of every call it makes. The tally is for
+    the page to display after a run and is never stored.
     """
 
     def __init__(
         self,
-        complete: Callable[[str, str], str] = _chat,
+        complete: Callable[[str, str], tuple[str, TokenUsage]] = _chat,
         count_tokens: Callable[[str], int] = _real_count_tokens,
     ) -> None:
         self.complete = complete
         self.count_tokens = count_tokens
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+
+    def _ask(self, system: str, user: str) -> str:
+        """One model call, its usage added to the tally."""
+        text, usage = self.complete(system, user)
+        self.prompt_tokens += usage.prompt_tokens
+        self.completion_tokens += usage.completion_tokens
+        return text.strip()
 
     def summarize_unit(self, title: str, blocks: Sequence[str]) -> UnitSummary:
         """The summary of one header's blocks: one call, or parts then a merge."""
         content = "\n".join(blocks)
         user = f"SECTION HEADING:\n{title}\n\nSECTION CONTENT:\n{content}"
         if self.count_tokens(user) <= MAX_INPUT_TOKENS:
-            return UnitSummary(text=self._clean(self.complete(SYSTEM_SECTION, user)), calls=1)
+            return UnitSummary(text=self._ask(SYSTEM_SECTION, user), calls=1)
 
         parts = self._split(blocks)
         summaries = []
         for part in parts:
             part_user = f"SECTION HEADING:\n{title}\n\nSECTION CONTENT:\n{part}"
-            summaries.append(self._clean(self.complete(SYSTEM_SECTION, part_user)))
+            summaries.append(self._ask(SYSTEM_SECTION, part_user))
 
         numbered = "\n".join(f"{i}. {s}" for i, s in enumerate(summaries, start=1))
         merge_user = f"SECTION HEADING:\n{title}\n\nPART SUMMARIES:\n{numbered}"
         return UnitSummary(
-            text=self._clean(self.complete(SYSTEM_MERGE, merge_user)),
+            text=self._ask(SYSTEM_MERGE, merge_user),
             calls=len(parts) + 1,
         )
 
@@ -219,7 +264,7 @@ class Summarizer:
         """The summary of a level-1 header from its children's summaries."""
         listed = "\n".join(f"- {child}: {summary}" for child, summary in children)
         user = f"CHAPTER HEADING:\n{title}\n\nSECTION SUMMARIES:\n{listed}"
-        return self._clean(self.complete(SYSTEM_PARENT, user))
+        return self._ask(SYSTEM_PARENT, user)
 
     def summarize_overall(self, title: str, chapters: Sequence[tuple[str, str]]) -> str:
         """The general summary of the whole document from its chapter summaries."""
@@ -228,11 +273,7 @@ class Summarizer:
             for i, (chapter, summary) in enumerate(chapters, start=1)
         )
         user = f"DOCUMENT TITLE:\n{title}\n\nCHAPTER SUMMARIES:\n{listed}"
-        return self._clean(self.complete(SYSTEM_DOCUMENT, user))
-
-    @staticmethod
-    def _clean(reply: str) -> str:
-        return reply.strip()
+        return self._ask(SYSTEM_DOCUMENT, user)
 
     def _split(self, blocks: Sequence[str]) -> list[str]:
         """Blocks packed greedily into parts within the input budget.
@@ -292,6 +333,10 @@ class SummarizeResult:
     total: int = 0
     done_total: int = 0
     seconds: float = 0.0
+    # What the run's model calls cost, as the server reported it. Shown on
+    # the queue row and never stored.
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
     error: str | None = None
     errors: list[str] = field(default_factory=list)
 
@@ -387,7 +432,7 @@ def summarize_document(
 
     _write_doc_summary(db, doc, summarizer, level1, level2, result, force=force)
 
-    return _finish(result, level1, level2, started)
+    return _finish(result, level1, level2, started, summarizer)
 
 
 def summarize_document_general(
@@ -415,7 +460,7 @@ def summarize_document_general(
 
     _write_doc_summary(db, doc, summarizer, level1, level2, result, force=force)
 
-    return _finish(result, level1, level2, started)
+    return _finish(result, level1, level2, started, summarizer)
 
 
 def _write_doc_summary(
@@ -466,12 +511,15 @@ def _finish(
     level1: list[Header],
     level2: list[Header],
     started: float,
+    summarizer: Summarizer,
 ) -> SummarizeResult:
     """Fill in the run's closing numbers, shared by both run shapes."""
     result.done_total = sum(
         1 for h in [*level1, *level2] if h.conclusion and h.conclusion.strip()
     )
     result.seconds = time.monotonic() - started
+    result.prompt_tokens = summarizer.prompt_tokens
+    result.completion_tokens = summarizer.completion_tokens
     if result.errors:
         result.error = result.errors[0]
     result.ok = result.failed == 0

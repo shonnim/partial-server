@@ -8,6 +8,7 @@
 {%- if result.doc_summarized %}{% set _ = parts.append('doc summary') %}{% endif -%}
 {%- if result.skipped %}{% set _ = parts.append(result.skipped ~ ' skipped') %}{% endif -%}
 {%- if result.calls %}{% set _ = parts.append(result.calls ~ ' call' ~ ('' if result.calls == 1 else 's')) %}{% endif -%}
+{%- set tokens = result.prompt_tokens + result.completion_tokens -%}
 <span class="pill {{ 'fail' if result.failed else 'ok' }}"
       data-sum-result data-doc-id="{{ result.id }}"
       data-summarized="{{ result.summarized }}"
@@ -18,8 +19,11 @@
       data-done="{{ '1' if result.done else '' }}"
       data-summary="{{ parts|join(' · ') }}"
       data-seconds="{{ '%.1f'|format(result.seconds) }}"
+      data-prompt-tokens="{{ result.prompt_tokens }}"
+      data-completion-tokens="{{ result.completion_tokens }}"
+      {% if tokens %}title="prompt {{ '{:,}'.format(result.prompt_tokens) }} · completion {{ '{:,}'.format(result.completion_tokens) }} tokens"{% endif %}
       {% if result.error %}data-error="{{ result.error }}"{% endif %}>
-  {{ '✗' if result.failed else '✓' }} {% if result.summarized or not result.doc_summarized %}{{ result.summarized }} summarized{{ ' · doc summary' if result.doc_summarized }}{% else %}doc summary{% endif %}{{ ' · ' ~ result.failed ~ ' failed' if result.failed }} · {{ '%.1f'|format(result.seconds) }}s
+  {{ '✗' if result.failed else '✓' }} {% if result.summarized or not result.doc_summarized %}{{ result.summarized }} summarized{{ ' · doc summary' if result.doc_summarized }}{% else %}doc summary{% endif %}{{ ' · ' ~ result.failed ~ ' failed' if result.failed }} · {{ '%.1f'|format(result.seconds) }}s{% if tokens %} · {{ '{:,}'.format(tokens) }} tok{% endif %}
 </span>
 {% if result.error %}
   <span class="gate-reason" title="{{ result.errors|join('; ') }}">{{ result.error }}</span>

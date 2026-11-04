@@ -92,6 +92,20 @@
     const stop = strip.querySelector("[data-run-stop]");
     const force = card.dataset.force === "1";
     const general = card.dataset.general === "1";
+    const llm = card.dataset.llm || "";
+
+    // The run's clock, ticking beside the state so slow models are visible.
+    const elapsedEl = strip.querySelector("[data-run-elapsed]");
+    const startedAt = performance.now();
+    const elapsedText = () => {
+      const s = Math.round((performance.now() - startedAt) / 1000);
+      return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`;
+    };
+    const clock = elapsedEl
+      ? setInterval(() => {
+          elapsedEl.textContent = `⏱ ${elapsedText()}`;
+        }, 1000)
+      : null;
 
     const run = { stopped: false };
     activeRun = run;
@@ -106,6 +120,7 @@
     let done = 0;
     let ok = 0;
     let failed = 0;
+    let tokens = 0; // the run's total, read off each row's reply; shown, never stored
 
     for (const row of rows) {
       if (run.stopped) {
@@ -114,9 +129,10 @@
         continue;
       }
 
+      const spent = tokens ? ` · ${tokens.toLocaleString()} tok` : "";
       state.textContent = general
-        ? `⚙ ${done} / ${rows.length} · doc summaries through the model`
-        : `⚙ ${done} / ${rows.length} · headers through the model`;
+        ? `⚙ ${done} / ${rows.length}${spent} · doc summaries through the model`
+        : `⚙ ${done} / ${rows.length}${spent} · headers through the model`;
       const cell = row.querySelector(".gate-status");
       if (cell) cell.innerHTML = '<span class="pill total">⚙ running…</span>';
 
@@ -125,7 +141,7 @@
           source: row,
           target: cell,
           swap: "innerHTML",
-          values: force ? { force: "1" } : {},
+          values: { ...(force ? { force: "1" } : {}), ...(llm ? { llm } : {}) },
         });
       } catch (err) {
         /* read the cell below either way */
@@ -133,6 +149,11 @@
 
       done += 1;
       const result = row.querySelector(".gate-status [data-sum-result]");
+      if (result) {
+        tokens +=
+          Number(result.dataset.promptTokens || 0) +
+          Number(result.dataset.completionTokens || 0);
+      }
       if (result && !Number(result.dataset.failed || 0)) {
         ok += 1;
       } else {
@@ -151,10 +172,13 @@
       }
     }
 
+    if (clock) clearInterval(clock);
     if (!run.abandoned) {
-      const tally = failed ? `✓ ${ok} · ✗ ${failed}` : `✓ ${ok}`;
+      let tally = failed ? `✓ ${ok} · ✗ ${failed}` : `✓ ${ok}`;
+      if (tokens) tally += ` · ${tokens.toLocaleString()} tok`;
       state.textContent = run.stopped ? `⏹ stopped · ${tally}` : `✓ done · ${tally}`;
       state.classList.toggle("ok", !run.stopped && !failed);
+      if (elapsedEl) elapsedEl.textContent = `⏱ ${elapsedText()}`;
       stop.hidden = true;
     }
     activeRun = null;

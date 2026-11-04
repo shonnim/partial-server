@@ -7,10 +7,14 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.services.documents import get_document
 from app.services.summarizing import (
+    DEFAULT_LLM,
+    SUMMARY_LLMS,
     build_general_queue,
     build_queue,
     decorate_level,
     document_summaries,
+    make_summarizer,
+    resolve_llm,
     summarize_document,
     summarize_document_general,
 )
@@ -50,6 +54,7 @@ def summarizing_page(request: Request, db: Session = Depends(get_db)) -> HTMLRes
             "total": total,
             "failed": failed,
             "max_batch": MAX_SUMMARIZE_BATCH,
+            "llms": SUMMARY_LLMS,
             **decorate_level(db, list_level(db)),
         },
     )
@@ -78,6 +83,7 @@ def summarizing_run(
     request: Request,
     selection: str = Form(""),
     force: bool = Form(False),
+    llm: str = Form(DEFAULT_LLM),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     """Turn the selection into a queue the browser walks one document at a time.
@@ -91,10 +97,16 @@ def summarizing_run(
             request, "summarizing/_partials/queue.html", {"error": error}
         )
 
+    llm = resolve_llm(llm)
     return templates.TemplateResponse(
         request,
         "summarizing/_partials/queue.html",
-        {"queue": build_queue(db, doc_ids, force=force), "force": force},
+        {
+            "queue": build_queue(db, doc_ids, force=force),
+            "force": force,
+            "llm": llm,
+            "llm_label": SUMMARY_LLMS[llm],
+        },
     )
 
 
@@ -103,6 +115,7 @@ def summarizing_general(
     request: Request,
     selection: str = Form(""),
     force: bool = Form(False),
+    llm: str = Form(DEFAULT_LLM),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     """The "General Summarize" queue: only the document summary is written.
@@ -117,6 +130,7 @@ def summarizing_general(
             request, "summarizing/_partials/queue.html", {"error": error}
         )
 
+    llm = resolve_llm(llm)
     return templates.TemplateResponse(
         request,
         "summarizing/_partials/queue.html",
@@ -124,6 +138,8 @@ def summarizing_general(
             "queue": build_general_queue(db, doc_ids, force=force),
             "force": force,
             "general": True,
+            "llm": llm,
+            "llm_label": SUMMARY_LLMS[llm],
         },
     )
 
@@ -135,6 +151,7 @@ def summarizing_run_one(
     request: Request,
     document_id: uuid.UUID,
     force: bool = Form(False),
+    llm: str = Form(DEFAULT_LLM),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     """Summarize one document's headers.
@@ -144,7 +161,7 @@ def summarizing_run_one(
     HTTP request.
     """
     doc = _document_or_404(db, document_id)
-    result = summarize_document(db, doc, force=force)
+    result = summarize_document(db, doc, force=force, summarizer=make_summarizer(llm))
 
     return templates.TemplateResponse(
         request, "summarizing/_partials/row_status.html", {"result": result}
@@ -160,11 +177,14 @@ def summarizing_general_one(
     request: Request,
     document_id: uuid.UUID,
     force: bool = Form(False),
+    llm: str = Form(DEFAULT_LLM),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     """Write one document's general summary from its stored header summaries."""
     doc = _document_or_404(db, document_id)
-    result = summarize_document_general(db, doc, force=force)
+    result = summarize_document_general(
+        db, doc, force=force, summarizer=make_summarizer(llm)
+    )
 
     return templates.TemplateResponse(
         request, "summarizing/_partials/row_status.html", {"result": result}
