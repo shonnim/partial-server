@@ -25,6 +25,7 @@ from app.models.chunk import Chunk
 from app.models.document import Document
 from app.models.header import Header, HeaderContent
 from app.services.chunking_imf1 import ImfHierarchicalChunker, StrategyResult
+from app.services.chunking_imf2 import Imf2HierarchicalChunker
 from app.services.tokenizer import TOKENIZER_NAME
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ class Chunker(Protocol):
 # yet, and the page says so rather than guessing a layout.
 CHUNKERS: dict[str, type[Chunker]] = {
     "imf-1": ImfHierarchicalChunker,
+    "imf-2": Imf2HierarchicalChunker,
 }
 
 

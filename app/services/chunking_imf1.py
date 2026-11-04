@@ -35,6 +35,10 @@ title are dropped, and what is left is grouped:
 
 The token budget counts the breadcrumb. Tokens are counted by the function
 passed in, so the strategy can be exercised without loading a tokenizer.
+
+Group ``imf-2`` (``chunking_imf2``) lays its documents out the same way with
+different markers; it subclasses the chunker and overrides only
+``LEVEL_PATTERNS`` and ``BOX_BULLET``.
 """
 
 import re
@@ -92,11 +96,14 @@ _LEVEL_PATTERNS = ((1, _LEVEL_1), (2, _LEVEL_2), (3, _LEVEL_3))
 _BOX_BULLET = re.compile(r"^\s*[□☐]")
 
 
-def detect_level(text: str | None) -> int | None:
+def detect_level(
+    text: str | None,
+    patterns: Sequence[tuple[int, re.Pattern[str]]] = _LEVEL_PATTERNS,
+) -> int | None:
     """Which of the three outline levels a heading is, or None for neither."""
     if not text:
         return None
-    for level, pattern in _LEVEL_PATTERNS:
+    for level, pattern in patterns:
         if pattern.match(text):
             return level
     return None
@@ -391,6 +398,11 @@ class _Buffer:
 class ImfHierarchicalChunker:
     """The ``imf-1`` strategy. See the module docstring."""
 
+    # What a sibling group overrides: the outline markers, and the bullet
+    # level a text chunk prefers to be cut at.
+    LEVEL_PATTERNS: Sequence[tuple[int, re.Pattern[str]]] = _LEVEL_PATTERNS
+    BOX_BULLET: re.Pattern[str] = _BOX_BULLET
+
     def __init__(self, count_tokens: Callable[[str], int] = _real_count_tokens) -> None:
         self.count_tokens = count_tokens
 
@@ -423,7 +435,7 @@ class ImfHierarchicalChunker:
                 # row is its own title never reaches this loop, so the path
                 # is rebuilt from the outline rather than from rows seen.
                 for header in _ancestry(headers, row.header_id):
-                    level = detect_level(header.header)
+                    level = detect_level(header.header, self.LEVEL_PATTERNS)
                     if level is None:
                         # The outline's own depth is the next best guide.
                         level = min(max(header.level, 1), 3)
@@ -438,7 +450,7 @@ class ImfHierarchicalChunker:
             if self._is_inline_heading(row):
                 # A heading the outline missed, printed as plain text. It moves
                 # the path and is not content.
-                level = detect_level(row.content)
+                level = detect_level(row.content, self.LEVEL_PATTERNS)
                 if level is not None:
                     path.set(level, row.content.strip())
                 continue
@@ -612,14 +624,13 @@ class ImfHierarchicalChunker:
             kept.append(row)
         return kept, tables
 
-    @staticmethod
-    def _is_inline_heading(row: _Row) -> bool:
+    def _is_inline_heading(self, row: _Row) -> bool:
         text = row.content.strip()
         return (
             row.type == "text"
             and "\n" not in text
             and len(text) <= MAX_INLINE_HEADING_CHARS
-            and detect_level(text) is not None
+            and detect_level(text, self.LEVEL_PATTERNS) is not None
         )
 
     # ---- text chunks -----------------------------------------------------------
@@ -656,8 +667,8 @@ class ImfHierarchicalChunker:
                 chunks[-2:] = [merged]
         return chunks
 
-    @staticmethod
-    def _group(pieces: list[_Piece], prefix_tokens: int) -> list[list[_Piece]]:
+    @classmethod
+    def _group(cls, pieces: list[_Piece], prefix_tokens: int) -> list[list[_Piece]]:
         """Greedy packing to the budget. Every piece costs its tokens plus the
         newline that joins it. Past the target, a ``□`` line opens a new
         chunk; past the maximum, the chunk is cut before its last ``□`` line
@@ -671,7 +682,7 @@ class ImfHierarchicalChunker:
 
         for piece in pieces:
             if current and current_tokens + cost(piece) > MAX_TOKENS:
-                head, tail = ImfHierarchicalChunker._cut_at_box(current, prefix_tokens)
+                head, tail = cls._cut_at_box(current, prefix_tokens)
                 groups.append(head)
                 current = tail
                 current_tokens = prefix_tokens + sum(cost(p) for p in current)
@@ -679,7 +690,7 @@ class ImfHierarchicalChunker:
                     groups.append(current)
                     current, current_tokens = [], prefix_tokens
             elif (
-                current and current_tokens >= TARGET_TOKENS and _BOX_BULLET.match(piece.text)
+                current and current_tokens >= TARGET_TOKENS and cls.BOX_BULLET.match(piece.text)
             ):
                 groups.append(current)
                 current, current_tokens = [], prefix_tokens
@@ -689,16 +700,16 @@ class ImfHierarchicalChunker:
             groups.append(current)
         return groups
 
-    @staticmethod
+    @classmethod
     def _cut_at_box(
-        current: list[_Piece], prefix_tokens: int
+        cls, current: list[_Piece], prefix_tokens: int
     ) -> tuple[list[_Piece], list[_Piece]]:
         """Split a full group before its last ``□`` line, if the part before
         it is still a chunk's worth; otherwise take the whole group."""
         running = prefix_tokens
         best = len(current)
         for i, piece in enumerate(current):
-            if i > 0 and _BOX_BULLET.match(piece.text) and running >= MIN_TOKENS:
+            if i > 0 and cls.BOX_BULLET.match(piece.text) and running >= MIN_TOKENS:
                 best = i
             running += piece.tokens + 1
         return current[:best], current[best:]
