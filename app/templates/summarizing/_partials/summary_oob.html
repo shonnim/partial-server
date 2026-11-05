@@ -1,0 +1,9 @@
+{#
+  Out-of-band riders on a box fragment: the pop-up's "done/total" pill and
+  the tree row's badge, recomputed from the run's closing numbers, so both
+  stay honest without a reload. htmx only honours hx-swap-oob on top-level
+  elements of the response, so this include sits after the box, never in it.
+#}
+<span class="pill ok" id="summaries-pill" hx-swap-oob="true">📝 {{ result.done_total }}/{{ result.total }}</span>
+<span class="summary-count" id="summary-count-{{ doc.id }}" hx-swap-oob="true"
+      data-summaries-url="{{ url_for('summarizing_summaries', document_id=doc.id) }}">{% if result.total %}<a class="pill {{ 'ok' if result.done else 'total' }}" data-viewer title="summarized / level 1-2 headers" href="{{ url_for('summarizing_summaries', document_id=doc.id) }}">📝 {{ result.done_total }}/{{ result.total }}</a>{% endif %}</span>

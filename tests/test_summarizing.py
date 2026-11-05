@@ -5,9 +5,12 @@ token counter the way the chunker takes its counter, so the split-and-merge
 behaviour and the prompt plumbing are exercised directly.
 """
 
+import uuid
+
 import pytest
 
-from app.llm import TokenUsage
+from app.llm import LLMError, TokenUsage
+from app.models.document import Document
 from app.models.header import Header, HeaderContent
 from app.services import summarizing
 from app.services.summarizing import (
@@ -16,6 +19,7 @@ from app.services.summarizing import (
     SYSTEM_PARENT,
     SYSTEM_SECTION,
     Summarizer,
+    _header_summary,
     block_text,
     subtree_blocks,
 )
@@ -151,6 +155,103 @@ def test_overall_reads_the_chapter_summaries_in_order() -> None:
     assert "DOCUMENT TITLE:\nIMF 재정점검보고서.pdf" in user
     assert "1. I. 채무의 현명한 관리: 1장 요약" in user
     assert "2. II. 재정 전망: 2장 요약" in user
+
+
+# ---- one header, as the pop-up boxes run it ----------------------------------------
+
+
+def test_header_summary_of_a_level2_reads_its_contents() -> None:
+    model = FakeModel()
+    h2 = Header(id=2, header="1. 세계 채무 현황", parent_id=1, level=2)
+    contents = {2: [HeaderContent(id=10, header_id=2, type="text", content="본문")]}
+
+    text, calls = _header_summary(h2, {}, contents, summarizer_of(model))
+
+    assert (text, calls) == ("요약 1", 1)
+    assert model.calls[0][0] == SYSTEM_SECTION
+
+
+def test_header_summary_of_a_level1_reads_its_children_summaries() -> None:
+    model = FakeModel()
+    h1 = Header(id=1, header="I. 부", level=1)
+    h2 = Header(id=2, header="1. 장", parent_id=1, level=2, conclusion="자식 요약")
+
+    text, calls = _header_summary(h1, {1: [h2]}, {}, summarizer_of(model))
+
+    assert (text, calls) == ("요약 1", 1)
+    system, user = model.calls[0]
+    assert system == SYSTEM_PARENT
+    assert "- 1. 장: 자식 요약" in user
+
+
+def test_header_summary_of_a_level1_without_child_summaries_falls_back() -> None:
+    # The batch run's shape: a level-1 header with nothing summarised under
+    # it is treated like a section, from its own content rows.
+    model = FakeModel()
+    h1 = Header(id=1, header="I. 부", level=1)
+    h2 = Header(id=2, header="1. 장", parent_id=1, level=2, conclusion=None)
+    contents = {1: [HeaderContent(id=10, header_id=1, type="text", content="본문")]}
+
+    _header_summary(h1, {1: [h2]}, contents, summarizer_of(model))
+
+    # Its own contents (and the unsummarised child's heading) go through the
+    # section prompt, not the parent prompt.
+    system, user = model.calls[0]
+    assert system == SYSTEM_SECTION
+    assert "본문" in user
+
+
+def test_strict_level1_without_child_summaries_refuses_the_fallback() -> None:
+    # The pop-up box's shape: the L1 button promises the children's
+    # conclusions as the source, so missing ones are an error, never a
+    # quiet re-read of the raw contents.
+    model = FakeModel()
+    h1 = Header(id=1, header="I. 부", level=1)
+    h2 = Header(id=2, header="1. 장", parent_id=1, level=2, conclusion=None)
+    contents = {1: [HeaderContent(id=10, header_id=1, type="text", content="본문")]}
+
+    with pytest.raises(LLMError, match="level-2"):
+        _header_summary(h1, {1: [h2]}, contents, summarizer_of(model), strict=True)
+    assert model.calls == []
+
+
+def test_strict_level2_still_reads_its_contents() -> None:
+    model = FakeModel()
+    h2 = Header(id=2, header="1. 장", parent_id=1, level=2)
+    contents = {2: [HeaderContent(id=10, header_id=2, type="text", content="본문")]}
+
+    text, calls = _header_summary(h2, {}, contents, summarizer_of(model), strict=True)
+
+    assert (text, calls) == ("요약 1", 1)
+    assert model.calls[0][0] == SYSTEM_SECTION
+
+
+def test_header_summary_without_contents_raises() -> None:
+    h2 = Header(id=2, header="1. 장", parent_id=1, level=2)
+    with pytest.raises(LLMError):
+        _header_summary(h2, {}, {}, summarizer_of(FakeModel()))
+
+
+# ---- the document box's strict source -----------------------------------------------
+
+
+def test_strict_doc_summary_refuses_the_level2_fallback() -> None:
+    # Level-2 summaries exist but no level-1 ones: the batch path would fall
+    # back to them, the document box must not. The error path touches no db,
+    # so None stands in for the session.
+    doc = Document(filename="보고서.pdf", summary=None)
+    h2 = Header(id=2, header="1. 장", parent_id=None, level=2, conclusion="요약 있음")
+    model = FakeModel()
+    result = summarizing.SummarizeResult(id=uuid.uuid4(), filename=doc.filename)
+
+    summarizing._write_doc_summary(
+        None, doc, summarizer_of(model), [], [h2], result, force=True, strict=True
+    )
+
+    assert result.failed == 1
+    assert "level-1" in result.errors[0]
+    assert model.calls == []
+    assert doc.summary is None
 
 
 # ---- building the text ------------------------------------------------------------

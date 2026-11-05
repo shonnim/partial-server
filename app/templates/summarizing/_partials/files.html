@@ -18,7 +18,8 @@
       <span class="tree-badges">
         <span class="content-count" data-count="{{ file.content_count }}">{% if file.content_count %}<a class="pill contents" data-viewer title="the blocks stored for this document" href="{{ url_for('sections_contents', document_id=file.id) }}">{{ file.content_count }} block{{ '' if file.content_count == 1 else 's' }}</a>{% endif %}</span>
         {#- Empty means "no level 1-2 headers"; `.summary-count:empty` collapses it. -#}
-        <span class="summary-count"
+        {#- The id is what the pop-up boxes' out-of-band fragments target. -#}
+        <span class="summary-count" id="summary-count-{{ file.id }}"
               data-summaries-url="{{ url_for('summarizing_summaries', document_id=file.id) }}">{% if sstat %}<a class="pill {{ 'ok' if sstat.is_done else 'total' }}" data-viewer title="summarized / level 1-2 headers" href="{{ url_for('summarizing_summaries', document_id=file.id) }}">📝 {{ sstat.done }}/{{ sstat.total }}</a>{% endif %}</span>
         <span class="pill total">{{ file.pages if file.pages is not none else '—' }} p</span>
         <a class="btn tree-view btn-pdf" data-viewer

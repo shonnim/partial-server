@@ -17,6 +17,7 @@ from app.services.summarizing import (
     resolve_llm,
     summarize_document,
     summarize_document_general,
+    summarize_one_header,
 )
 from app.services.tree import (
     DEFAULT_FILE_PAGE,
@@ -188,6 +189,62 @@ def summarizing_general_one(
 
     return templates.TemplateResponse(
         request, "summarizing/_partials/row_status.html", {"result": result}
+    )
+
+
+@router.post(
+    "/{document_id}/headers/{header_id}/summarize",
+    response_class=HTMLResponse,
+    name="summarizing_header_box",
+)
+def summarizing_header_box(
+    request: Request,
+    document_id: uuid.UUID,
+    header_id: int,
+    llm: str = Form(DEFAULT_LLM),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """Summarize one header — the button on its box in the pop-up.
+
+    The reply is the rewritten box; the pop-up's pill and the tree row's
+    badge ride along out of band so both stay honest without a reload.
+    """
+    doc = _document_or_404(db, document_id)
+    run = summarize_one_header(db, doc, header_id, summarizer=make_summarizer(llm))
+    if run is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "header not found")
+
+    header, result = run
+    return templates.TemplateResponse(
+        request,
+        "summarizing/_partials/header_box.html",
+        {"doc": doc, "header": header, "result": result, "oob": True},
+    )
+
+
+@router.post(
+    "/{document_id}/doc-summary", response_class=HTMLResponse, name="summarizing_doc_box"
+)
+def summarizing_doc_box(
+    request: Request,
+    document_id: uuid.UUID,
+    llm: str = Form(DEFAULT_LLM),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """Write the general summary — the button on the pop-up's document box.
+
+    Forced, like the header boxes, and strict: built from the level-1
+    summaries only, the source the box promises.
+    """
+    doc = _document_or_404(db, document_id)
+    result = summarize_document_general(
+        db, doc, force=True, strict=True, summarizer=make_summarizer(llm)
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "summarizing/_partials/doc_box.html",
+        {"doc": doc, "result": result, "oob": True},
     )
 
 

@@ -365,6 +365,49 @@ def _load_outline(
     return headers, children, contents
 
 
+def _child_summaries(
+    header: Header, children: dict[int | None, list[Header]]
+) -> list[tuple[str, str]]:
+    """The summarised level-2 children of a level-1 header, in outline order."""
+    return [
+        (child.header.strip(), child.conclusion.strip())
+        for child in children.get(header.id, [])
+        if child.level == 2 and child.conclusion and child.conclusion.strip()
+    ]
+
+
+def _header_summary(
+    header: Header,
+    children: dict[int | None, list[Header]],
+    contents: dict[int | None, list[HeaderContent]],
+    summarizer: Summarizer,
+    *,
+    strict: bool = False,
+) -> tuple[str, int]:
+    """One header's summary text and the model calls it took.
+
+    A level-2 header is summarised from the content rows of its subtree; a
+    level-1 header from its level-2 children's stored conclusions. A level-1
+    header without any summarised children falls back to its own content
+    rows in the batch run — ``strict``, the pop-up box's mode, refuses
+    instead: each box's button promises its level's own source.
+    """
+    if header.level == 1:
+        summarised = _child_summaries(header, children)
+        if summarised:
+            return summarizer.summarize_parent(header.header.strip(), summarised), 1
+        if strict:
+            raise LLMError(
+                "no summarized level-2 headers under this one — summarize them first"
+            )
+
+    blocks = subtree_blocks(header, children, contents)
+    if not blocks:
+        raise LLMError("no content rows under this header")
+    unit = summarizer.summarize_unit(header.header.strip(), blocks)
+    return unit.text, unit.calls
+
+
 def summarize_document(
     db: Session,
     doc: Document,
@@ -404,31 +447,9 @@ def summarize_document(
             result.errors.append(f"'{header.header.strip()}': {exc}")
             logger.warning("summarizing header %s of %s failed: %s", header.id, doc.id, exc)
 
-    def from_contents(header: Header) -> tuple[str, int]:
-        blocks = subtree_blocks(header, children, contents)
-        if not blocks:
-            raise LLMError("no content rows under this header")
-        unit = summarizer.summarize_unit(header.header.strip(), blocks)
-        return unit.text, unit.calls
-
-    for header in level2:
-        write(header, lambda h=header: from_contents(h))
-
-    for header in level1:
-
-        def make(h: Header = header) -> tuple[str, int]:
-            summarised = [
-                (child.header.strip(), child.conclusion.strip())
-                for child in children.get(h.id, [])
-                if child.level == 2 and child.conclusion and child.conclusion.strip()
-            ]
-            if summarised:
-                return summarizer.summarize_parent(h.header.strip(), summarised), 1
-            # No level-2 children (or none summarised): the header's own
-            # contents are the next best source, handled like a section.
-            return from_contents(h)
-
-        write(header, make)
+    # Level 2 first, so the level-1 headers read their children's summaries.
+    for header in [*level2, *level1]:
+        write(header, lambda h=header: _header_summary(h, children, contents, summarizer))
 
     _write_doc_summary(db, doc, summarizer, level1, level2, result, force=force)
 
@@ -441,13 +462,16 @@ def summarize_document_general(
     *,
     force: bool = False,
     summarizer: Summarizer | None = None,
+    strict: bool = False,
 ) -> SummarizeResult:
     """Write only the general summary of ``doc``, from the header conclusions
     already stored.
 
     The headers themselves are left untouched — this is the "General
     Summarize" path for a document whose header summaries exist but whose
-    ``documents.summary`` does not. Returns what happened, never raises.
+    ``documents.summary`` does not, and the pop-up's document box
+    (``strict``: level-1 summaries only, no level-2 fallback). Returns what
+    happened, never raises.
     """
     summarizer = summarizer or Summarizer()
     result = SummarizeResult(id=doc.id, filename=doc.filename)
@@ -458,9 +482,60 @@ def summarize_document_general(
     level1 = [h for h in headers if h.level == 1]
     result.total = len(level1) + len(level2)
 
-    _write_doc_summary(db, doc, summarizer, level1, level2, result, force=force)
+    _write_doc_summary(
+        db, doc, summarizer, level1, level2, result, force=force, strict=strict
+    )
 
     return _finish(result, level1, level2, started, summarizer)
+
+
+def summarize_one_header(
+    db: Session,
+    doc: Document,
+    header_id: int,
+    *,
+    summarizer: Summarizer | None = None,
+) -> tuple[Header, SummarizeResult] | None:
+    """Rewrite the conclusion of one level 1-2 header — the pop-up box's button.
+
+    Always forced: the click names the header, so a stored conclusion is
+    replaced. Strictly from the level's own source — a level-2 header from
+    its content rows, a level-1 header from its children's conclusions, no
+    fallbacks. Returns the header and what happened, or None when
+    ``header_id`` is not a level 1-2 header of ``doc``; past that it never
+    raises, the caller being a box in the pop-up.
+    """
+    summarizer = summarizer or Summarizer()
+    started = time.monotonic()
+
+    headers, children, contents = _load_outline(db, doc.id)
+    header = next(
+        (h for h in headers if h.id == header_id and h.level in SUMMARY_LEVELS), None
+    )
+    if header is None:
+        return None
+
+    result = SummarizeResult(id=doc.id, filename=doc.filename)
+    level1 = [h for h in headers if h.level == 1]
+    level2 = [h for h in headers if h.level == 2]
+    result.total = len(level1) + len(level2)
+    result.has_summary = bool(doc.summary and doc.summary.strip())
+
+    try:
+        summary, calls = _header_summary(
+            header, children, contents, summarizer, strict=True
+        )
+        header.conclusion = summary
+        db.commit()
+        result.summarized = 1
+        result.calls = calls
+    except LLMError as exc:
+        db.rollback()
+        result.failed = 1
+        result.errors.append(str(exc))
+        logger.warning("summarizing header %s of %s failed: %s", header.id, doc.id, exc)
+
+    return header, _finish(result, level1, level2, started, summarizer)
 
 
 def _write_doc_summary(
@@ -472,22 +547,29 @@ def _write_doc_summary(
     result: SummarizeResult,
     *,
     force: bool,
+    strict: bool = False,
 ) -> None:
     """The general summary of the whole document, from the level-1 summaries —
-    or the level-2 ones when the outline has no level-1 rows.
+    or, outside ``strict``, the level-2 ones when no level-1 summary exists.
 
+    ``strict`` is the pop-up's document box: its button promises the level-1
+    summaries as the source, so missing ones are an error, not a fallback.
     A summary already present is kept unless forced.
     """
     result.has_summary = bool(doc.summary and doc.summary.strip())
     if result.has_summary and not force:
         return
 
-    tops = [h for h in level1 if h.conclusion and h.conclusion.strip()] or [
-        h for h in level2 if h.conclusion and h.conclusion.strip()
-    ]
+    tops = [h for h in level1 if h.conclusion and h.conclusion.strip()]
+    if not tops and not strict:
+        tops = [h for h in level2 if h.conclusion and h.conclusion.strip()]
     if not tops:
         result.failed += 1
-        result.errors.append("document summary: no header summaries to build it from")
+        result.errors.append(
+            "no level-1 summaries to build it from — summarize them first"
+            if strict
+            else "document summary: no header summaries to build it from"
+        )
         return
 
     try:

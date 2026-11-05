@@ -1,0 +1,42 @@
+{#
+  The document-level box of the summaries pop-up: the general summary and a
+  button that rewrites it from the level-1 headers' stored conclusions —
+  strictly, no level-2 fallback: each box's button uses its level's own source.
+
+  Included by summaries_modal.html, and returned on its own as the fragment
+  the button swaps in — then `result` carries the run's outcome and `oob`
+  adds the pop-up pill and the tree badge out of band.
+#}
+<section class="contents-block summary-box summary-doc">
+  <div class="contents-meta">
+    <span class="pill group" title="general summary of the whole document">DOC</span>
+    <span class="contents-order">Document summary</span>
+    <span class="summary-actions">
+      <span class="spinner"></span>
+      <button type="button" class="btn"
+              title="write the general summary from the level-1 header summaries (replaces the current one)"
+              hx-post="{{ url_for('summarizing_doc_box', document_id=doc.id) }}"
+              hx-vals='js:{llm: (document.getElementById("summarize-llm") || {}).value || ""}'
+              hx-target="closest section"
+              hx-swap="outerHTML"
+              hx-indicator="closest .summary-actions"
+              hx-disabled-elt="this">
+        📝 Summarize
+      </button>
+    </span>
+  </div>
+  {% if result %}
+    {% if result.error %}
+      <p class="check-note summary-error">✗ {{ result.error }}</p>
+    {% else %}
+      {% set tokens = result.prompt_tokens + result.completion_tokens %}
+      <p class="check-note summary-run">✓ summarized · {{ '%.1f'|format(result.seconds) }}s{% if tokens %} · {{ '{:,}'.format(tokens) }} tok{% endif %}</p>
+    {% endif %}
+  {% endif %}
+  {% if doc.summary and doc.summary.strip() %}
+    <pre class="contents-field is-content">{{ doc.summary }}</pre>
+  {% else %}
+    <p class="check-note">No document summary yet. It is built from the level-1 summaries below — write those first, then summarize here.</p>
+  {% endif %}
+</section>
+{% if oob %}{% include "summarizing/_partials/summary_oob.html" %}{% endif %}

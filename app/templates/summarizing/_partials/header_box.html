@@ -1,0 +1,43 @@
+{#
+  One header's box of the summaries pop-up — a chapter (L1) or section (L2)
+  frame, the stored conclusion, and a button that rewrites just this header
+  from its level's own source: an L2 from its content blocks, an L1 from its
+  L2 children's conclusions — strictly, no fallbacks.
+
+  Included by summaries_modal.html per header, and returned on its own as
+  the fragment the button swaps in — then `result` carries the run's outcome
+  and `oob` adds the pop-up pill and the tree badge out of band.
+#}
+<li class="contents-block summary-box summary-l{{ header.level }}">
+  <div class="contents-meta">
+    <span class="pill {{ 'group' if header.level == 1 else 'total' }}" title="outline level">L{{ header.level }}</span>
+    <span class="contents-order" title="{{ header.header }}">{{ header.header }}</span>
+    <span class="summary-actions">
+      <span class="spinner"></span>
+      <button type="button" class="btn"
+              title="{{ 'summarize this chapter from its level-2 section summaries' if header.level == 1 else 'summarize this section from its stored content blocks' }} (replaces the stored summary)"
+              hx-post="{{ url_for('summarizing_header_box', document_id=doc.id, header_id=header.id) }}"
+              hx-vals='js:{llm: (document.getElementById("summarize-llm") || {}).value || ""}'
+              hx-target="closest li"
+              hx-swap="outerHTML"
+              hx-indicator="closest .summary-actions"
+              hx-disabled-elt="this">
+        📝 Summarize
+      </button>
+    </span>
+  </div>
+  {% if result %}
+    {% if result.error %}
+      <p class="check-note summary-error">✗ {{ result.error }}</p>
+    {% else %}
+      {% set tokens = result.prompt_tokens + result.completion_tokens %}
+      <p class="check-note summary-run">✓ summarized · {{ '%.1f'|format(result.seconds) }}s{% if tokens %} · {{ '{:,}'.format(tokens) }} tok{% endif %}</p>
+    {% endif %}
+  {% endif %}
+  {% if header.conclusion and header.conclusion.strip() %}
+    <pre class="contents-field is-content">{{ header.conclusion }}</pre>
+  {% else %}
+    <p class="check-note">No summary yet.</p>
+  {% endif %}
+</li>
+{% if oob %}{% include "summarizing/_partials/summary_oob.html" %}{% endif %}
