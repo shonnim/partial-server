@@ -193,6 +193,27 @@ def put_object(bucket: str, key: str, body: bytes, *, content_type: str) -> None
     get_client().put_object(Bucket=bucket, Key=key, Body=body, ContentType=content_type)
 
 
+def copy_object(
+    source_bucket: str, source_key: str, dest_bucket: str, dest_key: str
+) -> None:
+    """Copy one object server-side — the bytes never pass through this process.
+
+    Copying over an existing destination key just rewrites the same content,
+    so a re-run of a migration is harmless. A missing source surfaces as
+    ObjectNotFound, named after the source, not the destination.
+    """
+    try:
+        get_client().copy_object(
+            Bucket=dest_bucket,
+            Key=dest_key,
+            CopySource={"Bucket": source_bucket, "Key": source_key},
+        )
+    except ClientError as exc:
+        if missing := _as_missing(exc, source_bucket, source_key):
+            raise missing from exc
+        raise
+
+
 # How long a presigned link stays valid. Long enough to read a document,
 # short enough that a leaked link goes stale the same day.
 PRESIGN_EXPIRES_SECONDS = 60 * 60

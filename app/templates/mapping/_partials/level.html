@@ -1,0 +1,41 @@
+{#
+  One level of the mapping tree: subfolders first, then the documents sitting
+  directly in this folder. Rendered into the parent's <ul class="tree-children">,
+  so it emits list items only.
+
+  This tree is for browsing, not selecting — there are no checkboxes. Clicking
+  a folder expands it and writes its path into the form (index.html wires that).
+#}
+{% for folder in level.folders %}
+  <li class="tree-node" data-path="{{ folder.path }}" data-total="{{ folder.total }}">
+    <div class="tree-row">
+      <button type="button" class="tree-label" aria-expanded="false"
+              hx-get="{{ url_for('mapping_nodes') }}?path={{ folder.path|urlencode }}"
+              hx-target="next .tree-children"
+              hx-swap="innerHTML"
+              hx-trigger="click once">
+        <span class="tree-icon">
+          <span class="icon-closed">📁</span><span class="icon-open">📂</span>
+        </span>
+        <span class="tree-name" title="{{ folder.path }}">{{ folder.name }}</span>
+      </button>
+      <span class="tree-badges">
+        {% if folder.failed %}<span class="pill fail">✗ {{ folder.failed }}</span>{% endif %}
+        <span class="pill total">{{ folder.total }}</span>
+        <span class="pill {{ 'ok' if folder.all_mapped else 'total' }}"
+              title="{{ folder.with_mapped }} of {{ folder.total }} documents have 게시물ID and 첨부파일ID saved">
+          🔗 {{ folder.with_mapped }}/{{ folder.total }}
+        </span>
+        <button type="button" class="btn tree-view btn-copy-path"
+                title="Copy path: {{ folder.path }}">⧉ path</button>
+      </span>
+    </div>
+    <ul class="tree-children" hidden></ul>
+  </li>
+{% endfor %}
+
+{% include "mapping/_partials/files.html" %}
+
+{% if level.is_empty %}
+  <li class="tree-empty">Empty folder</li>
+{% endif %}

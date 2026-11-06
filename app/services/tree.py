@@ -56,6 +56,14 @@ class FolderNode:
     # Documents beneath this folder that already have chunks stored, which
     # the Chunking page shows the same way.
     with_chunks: int = 0
+    # Documents beneath this folder already migrated into the RAG files
+    # bucket. When it is every one of them, the Transform page has nothing
+    # left to select there.
+    with_migrated: int = 0
+    # Documents beneath this folder that already carry the source system's
+    # ids (게시물ID and 첨부파일ID). The Mapping page shows it per folder so a
+    # half-mapped folder stands out.
+    with_mapped: int = 0
 
     @property
     def all_stored(self) -> bool:
@@ -68,6 +76,14 @@ class FolderNode:
     @property
     def all_sectioned(self) -> bool:
         return self.total > 0 and self.with_contents == self.total
+
+    @property
+    def all_migrated(self) -> bool:
+        return self.total > 0 and self.with_migrated == self.total
+
+    @property
+    def all_mapped(self) -> bool:
+        return self.total > 0 and self.with_mapped == self.total
 
 
 @dataclass(frozen=True)
@@ -98,6 +114,17 @@ class FileNode:
     group_id: str | None = None
     # How many chunks a Chunking run has stored for this document.
     chunk_count: int = 0
+    # Whether the Transform page has migrated this document into the RAG
+    # files bucket. The Transform tree disables the row once it has been.
+    migrated: bool = False
+    # The source system's ids written by the Mapping page, or None when this
+    # document has not been mapped yet.
+    source_document_id: str | None = None
+    atch_file_id: str | None = None
+
+    @property
+    def mapped(self) -> bool:
+        return self.source_document_id is not None and self.atch_file_id is not None
 
 
 @dataclass(frozen=True)
@@ -140,7 +167,10 @@ def child_folders(db: Session, path: str) -> list[FolderNode]:
     rows = db.execute(
         text(f"""
             WITH scoped AS (
-                SELECT status, group_id, {_FOLDER_EXPR} AS folder,
+                SELECT status, group_id, migrated_at,
+                       (source_document_id IS NOT NULL
+                        AND atch_file_id IS NOT NULL) AS mapped,
+                       {_FOLDER_EXPR} AS folder,
                        EXISTS (
                            SELECT 1 FROM headers h WHERE h.doc_id = documents.id
                        ) AS stored,
@@ -167,7 +197,9 @@ def child_folders(db: Session, path: str) -> list[FolderNode]:
                    count(*) FILTER (WHERE latest_backend = :vlm_backend) AS with_vlm,
                    count(*) FILTER (WHERE sectioned) AS with_contents,
                    count(*) FILTER (WHERE group_id IS NOT NULL) AS with_group,
-                   count(*) FILTER (WHERE chunked) AS with_chunks
+                   count(*) FILTER (WHERE chunked) AS with_chunks,
+                   count(*) FILTER (WHERE migrated_at IS NOT NULL) AS with_migrated,
+                   count(*) FILTER (WHERE mapped) AS with_mapped
             FROM scoped
             WHERE folder IS NOT NULL
               AND split_part(folder, '/', :child_depth) <> ''
@@ -188,6 +220,8 @@ def child_folders(db: Session, path: str) -> list[FolderNode]:
             with_contents=r.with_contents,
             with_group=r.with_group,
             with_chunks=r.with_chunks,
+            with_migrated=r.with_migrated,
+            with_mapped=r.with_mapped,
         )
         for r in rows
     ]
@@ -216,7 +250,8 @@ def folder_files(
         text(f"""
             SELECT documents.id, documents.filename, documents.size_bytes,
                    documents.pages, documents.status, documents.has_header,
-                   documents.group_id,
+                   documents.group_id, documents.migrated_at,
+                   documents.source_document_id, documents.atch_file_id,
                    (
                        SELECT count(*) FROM headers h WHERE h.doc_id = documents.id
                    ) AS header_count,
@@ -262,6 +297,9 @@ def folder_files(
             content_count=r.content_count,
             group_id=r.group_id,
             chunk_count=r.chunk_count,
+            migrated=r.migrated_at is not None,
+            source_document_id=r.source_document_id,
+            atch_file_id=r.atch_file_id,
         )
         for r in rows
     ]

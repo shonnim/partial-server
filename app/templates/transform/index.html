@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Transform · partial-server{% endblock %}
+{% block heading %}📦 Transform{% endblock %}
+{% block subheading %}Tick files or folders and migrate each document's PDF, metadata, content list, and images into the RAG files bucket.{% endblock %}
+
+{% block actions %}
+  <span id="tree-selection" class="toolbar-count">Nothing selected</span>
+{% endblock %}
+
+{% block content %}
+  <div class="parsing-layout">
+    <div class="parsing-main">
+      <div class="card tree-card">
+        <div class="tree-head">
+          <span class="tree-head-label">📚 Corpus</span>
+          <span class="tree-badges" id="tree-root-badges" data-total="{{ total }}">
+            {% if failed %}<span class="pill fail">✗ {{ "{:,}".format(failed) }}</span>{% endif %}
+            <span class="pill total">{{ "{:,}".format(total) }}</span>
+            <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
+          </span>
+        </div>
+
+        <ul class="tree tree-children" id="tree-root">
+          {% include "transform/_partials/level.html" %}
+        </ul>
+      </div>
+    </div>
+
+    {#- The migrate box sits beside the tree. One button posts the selection;
+        each document becomes one folder in the RAG bucket. -#}
+    <aside class="side-panel">
+      <section class="card side-box" id="migrate-box">
+        <div class="side-box-head">
+          <span class="side-box-title">📦 Migrate</span>
+        </div>
+        <p class="side-note">
+          Target bucket: <strong>{{ rag_bucket }}</strong>
+        </p>
+        <p class="side-note">
+          Each document becomes one folder holding the source PDF, a
+          <code>_metadata.json</code>, and the latest parse's content list and
+          <code>images/</code> from the derived bucket.
+        </p>
+        <form id="migrate-form"
+              hx-post="{{ url_for('transform_migrate') }}"
+              hx-vals="js:{selection: window.treeSelectionJSON()}"
+              hx-target="#migrate-result"
+              hx-swap="innerHTML"
+              hx-indicator="#migrate-spinner"
+              hx-confirm="Migrate the selected documents into {{ rag_bucket }}?">
+          <div class="side-box-actions">
+            <button type="submit" class="btn btn-primary btn-migrate" id="btn-migrate"
+                    data-label="🚚 Migrate selection">
+              🚚 Migrate selection
+            </button>
+            <span class="spinner" id="migrate-spinner"></span>
+          </div>
+        </form>
+        <p class="side-note">
+          Applies to every ticked document, including everything under a ticked
+          folder · at most <strong>{{ "{:,}".format(max_batch) }}</strong> per click ·
+          re-migrating rewrites the same keys, nothing is duplicated.
+        </p>
+      </section>
+
+      {#- Where the Migrate button's reply lands. Empty until the first click. -#}
+      <div id="migrate-result"></div>
+    </aside>
+  </div>
+
+  {#- The viewer pop-up, same as on the documents list. -#}
+  <div id="modal"></div>
+
+  <script src="{{ static_url('js/viewer-modal.js') }}" defer></script>
+  <script src="{{ static_url('js/tree.js') }}" defer></script>
+  <script src="{{ static_url('js/transform.js') }}" defer></script>
+{% endblock %}

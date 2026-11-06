@@ -11,11 +11,13 @@ from app.routers import (
     embedding,
     grouping,
     headers,
+    mapping,
     parsed_docs,
     parsing,
     retrieval,
     sections,
     summarizing,
+    transform,
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -31,11 +33,13 @@ app.include_router(documents.router)
 app.include_router(embedding.router)
 app.include_router(grouping.router)
 app.include_router(headers.router)
+app.include_router(mapping.router)
 app.include_router(parsed_docs.router)
 app.include_router(parsing.router)
 app.include_router(retrieval.router)
 app.include_router(sections.router)
 app.include_router(summarizing.router)
+app.include_router(transform.router)
 
 
 @app.get("/health")

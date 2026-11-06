@@ -18,6 +18,11 @@ class Settings(BaseSettings):
 
     bucket_documents: str = Field(alias="BUCKET_DOCUMENTS")
     bucket_derived: str = Field(alias="BUCKET_DERIVED")
+    # Where the Transform page assembles the per-document RAG folders: the
+    # source PDF, its metadata JSON, and the parse outputs, side by side.
+    bucket_rag_files: str = Field(
+        default="public-finance-rag-files", alias="BUCKET_RAG_FILES"
+    )
 
     # The OpenAI-compatible endpoint used to turn a pasted table of contents
     # into structured headers. Self-hosted, so the base URL is not optional.
@@ -72,11 +77,10 @@ class Settings(BaseSettings):
     qdrant_url: str = Field(default="http://localhost:6333", alias="QDRANT_URL")
     qdrant_collection: str = Field(default="chunks", alias="QDRANT_COLLECTION")
 
-    # The document parsing service the Pages method sends a contents page to.
-    # One VLM pass over a few pages is slow, so the timeout is generous.
-    doc_extract_base_url: str = Field(
-        default="https://doc-extract-api.ihopper.co.kr", alias="DOC_EXTRACT_BASE_URL"
-    )
+    # The Pages method sends a contents page to the same MinerU service the
+    # Parsing page uses (mineru_base_url below), via its synchronous
+    # /file_parse endpoint. One VLM pass over a few pages is slow, so the
+    # timeout is generous.
     doc_extract_timeout_seconds: float = Field(
         default=600.0, alias="DOC_EXTRACT_TIMEOUT_SECONDS"
     )

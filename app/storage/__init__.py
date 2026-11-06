@@ -1,6 +1,7 @@
 from app.storage.rustfs import (
     ObjectNotFound,
     ObjectSummary,
+    copy_object,
     delete_objects,
     list_all_objects,
     list_objects,
@@ -13,6 +14,7 @@ from app.storage.rustfs import (
 __all__ = [
     "ObjectNotFound",
     "ObjectSummary",
+    "copy_object",
     "delete_objects",
     "list_all_objects",
     "list_objects",

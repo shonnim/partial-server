@@ -57,8 +57,10 @@ def parse_pages(
             f"page range {start_page}..{end_page} is not valid"
         )
 
+    # The same service the Parsing page submits whole documents to, so the
+    # one MINERU_BASE_URL setting steers both.
     settings = get_settings()
-    url = f"{settings.doc_extract_base_url.rstrip('/')}/file_parse"
+    url = f"{settings.mineru_base_url.rstrip('/')}/file_parse"
 
     try:
         response = httpx.post(

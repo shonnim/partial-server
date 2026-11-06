@@ -1,0 +1,70 @@
+{#
+  The manual mapping: paste the one JSON block that belongs to this file and
+  save its ids straight onto the document. No name matching here — this dialog
+  exists for exactly the files the matcher could not resolve.
+
+  The textarea keeps whatever was submitted when parsing fails; the paste is
+  the expensive part and must never be asked for twice.
+#}
+<dialog class="modal modal-manual" aria-label="Manual mapping">
+  <header class="modal-head">
+    <span class="modal-heading">
+      <strong class="modal-title" title="{{ doc.filename }}">{{ doc.filename }}</strong>
+      <span class="modal-sub">Manual · paste this file's JSON block</span>
+    </span>
+    <span class="modal-actions">
+      {% if doc.source_document_id %}
+        <span class="pill ok" title="게시물ID {{ doc.source_document_id }} · 첨부파일ID {{ doc.atch_file_id }} · 첨부순번 {{ doc.atch_file_seq }}">
+          🔗 {{ doc.source_document_id }} · {{ doc.atch_file_seq }}
+        </span>
+      {% else %}
+        <span class="pill total">not mapped</span>
+      {% endif %}
+      <span class="spinner" id="manual-map-spinner"></span>
+      <button type="button" class="btn" data-close-modal>Close</button>
+    </span>
+  </header>
+
+  <form class="manual-form"
+        hx-post="{{ url_for('mapping_manual_submit', document_id=doc.id) }}"
+        hx-target="#modal"
+        hx-swap="innerHTML"
+        hx-indicator="#manual-map-spinner"
+        hx-disabled-elt="find button[type=submit]">
+    {% if error %}
+      <p class="parsed-error">⚠ {{ error }}</p>
+    {% endif %}
+    {% if saved %}
+      <p class="check-note">
+        💾 Saved — 게시물ID <strong>{{ doc.source_document_id }}</strong>,
+        첨부파일ID <strong>{{ doc.atch_file_id }}</strong>,
+        첨부순번 <strong>{{ doc.atch_file_seq }}</strong>.
+        {% if name_differs %}
+          ⚠ The block's 파일명 “{{ entry_name }}” does not match this file's
+          name — saved anyway, double-check it was the right block.
+        {% endif %}
+      </p>
+    {% endif %}
+
+    <textarea class="mapping-json" name="payload" rows="12" autofocus
+              spellcheck="false" autocomplete="off"
+              placeholder='{&#10;  "유형명": "예산(나라살림)",&#10;  "파일명": "2026년 나라살림 예산개요.pdf",&#10;  "게시물ID": 51735,&#10;  "첨부파일ID": "F0000000000000004746",&#10;  "첨부순번": 1&#10;}'>{{ payload }}</textarea>
+
+    <p class="manual-hint">
+      One block only — a bare <code>{…}</code> object, or a <code>[…]</code>
+      list holding exactly one. Its 게시물ID, 첨부파일ID and 첨부순번 are
+      written to this document; the 파일명 is not matched against anything.
+    </p>
+
+    <div class="manual-foot">
+      <span class="manual-warn">
+        {% if doc.source_document_id %}
+          ⚠ Saving replaces the ids already stored on this document.
+        {% endif %}
+      </span>
+      <span class="manual-actions">
+        <button type="submit" class="btn btn-primary">💾 Save DB</button>
+      </span>
+    </div>
+  </form>
+</dialog>

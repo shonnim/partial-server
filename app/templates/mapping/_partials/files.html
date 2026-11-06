@@ -1,0 +1,43 @@
+{#
+  Document rows for one folder, plus the "load more" button when the folder
+  holds more than a page of them. No checkboxes here — the mapping check works
+  from the folder path, not from a selection.
+#}
+{% for file in level.files %}
+  <li class="tree-node is-file" data-id="{{ file.id }}">
+    <div class="tree-row">
+      <span class="tree-icon">📄</span>
+      <span class="tree-name" title="{{ file.filename }}">{{ file.filename }}</span>
+      <span class="tree-badges">
+        <span class="pill total">{{ file.pages if file.pages is not none else '—' }} p</span>
+        <span class="pill total">{{ file.size_bytes|filesize }}</span>
+        {% if file.mapped %}
+          <span class="pill ok"
+                title="게시물ID {{ file.source_document_id }} · 첨부파일ID {{ file.atch_file_id }}">
+            🔗 {{ file.source_document_id }}
+          </span>
+        {% else %}
+          <span class="pill fail"
+                title="게시물ID{{ '' if file.source_document_id else ' missing' }} · 첨부파일ID{{ '' if file.atch_file_id else ' missing' }}">
+            🔗 unmapped
+          </span>
+        {% endif %}
+        <a class="btn tree-view" data-viewer
+           href="{{ url_for('mapping_manual_form', document_id=file.id) }}">Manual</a>
+        <a class="btn tree-view btn-pdf" data-viewer
+           href="{{ url_for('document_viewer', document_id=file.id) }}">PDF</a>
+      </span>
+    </div>
+  </li>
+{% endfor %}
+
+{% if level.remaining_files %}
+  <li class="tree-more">
+    <button type="button" class="btn"
+            hx-get="{{ url_for('mapping_nodes') }}?path={{ level.path|urlencode }}&offset={{ level.next_offset }}"
+            hx-target="closest .tree-more"
+            hx-swap="outerHTML">
+      ↓ Load {{ level.remaining_files }} more
+    </button>
+  </li>
+{% endif %}

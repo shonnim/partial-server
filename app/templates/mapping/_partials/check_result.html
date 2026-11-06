@@ -1,0 +1,58 @@
+{#
+  The outcome of a Check click: every pasted entry with its verdict, then the
+  folder's files no entry named. Errors come back as this card too — the
+  caller is a button on the page, and a 4xx would leave the panel blank.
+#}
+{% if error %}
+  <div class="card check-result is-error">{{ error }}</div>
+{% else %}
+  <div class="card check-result">
+    <div class="check-summary">
+      {% if saved is not none %}
+        <span class="pill ok">💾 {{ saved }} saved</span>
+      {% endif %}
+      <span class="pill ok">✓ {{ result.matched }} matched</span>
+      {% if result.not_found %}<span class="pill fail">✗ {{ result.not_found }} not found</span>{% endif %}
+      {% if result.ambiguous %}<span class="pill fail">⚠ {{ result.ambiguous }} ambiguous</span>{% endif %}
+      <span class="pill total">{{ result.total_docs }} file{{ '' if result.total_docs == 1 else 's' }} in {{ result.path }}</span>
+    </div>
+
+    <ul class="migrate-list">
+      {% for check in result.checks %}
+        <li class="migrate-item {{ 'is-error' if not check.ok }}">
+          <span class="tree-name" title="{{ check.entry.name }}">{{ check.entry.name }}</span>
+          {% if check.duplicate %}
+            <span class="pill fail" title="The same 파일명 appears more than once in the JSON">⚠ duplicate in JSON</span>
+          {% elif check.candidates > 1 %}
+            <span class="pill fail" title="{{ check.candidates }} files in the folder share this name">⚠ {{ check.candidates }} files match</span>
+          {% elif check.doc %}
+            <span class="pill ok" title="{{ check.doc.filename }}">✓ {{ check.doc.filename }}</span>
+          {% elif check.folder %}
+            <span class="pill ok"
+                  title="Zip entry — its ids go onto every file in {{ check.folder }}">
+              📁 {{ check.folder_docs|length }} file{{ '' if check.folder_docs|length == 1 else 's' }} in {{ check.folder.rsplit('/', 1)[-1] }}
+            </span>
+          {% elif check.folder_candidates > 1 %}
+            <span class="pill fail" title="{{ check.folder_candidates }} folders under the path share this name">⚠ {{ check.folder_candidates }} folders match</span>
+          {% else %}
+            <span class="pill fail">✗ no file</span>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+
+    {% if result.unmapped %}
+      <p class="check-note">
+        📄 {{ result.unmapped|length }} file{{ '' if result.unmapped|length == 1 else 's' }}
+        in the folder with no JSON entry:
+      </p>
+      <ul class="migrate-list">
+        {% for filename in result.unmapped %}
+          <li class="migrate-item is-error">
+            <span class="tree-name" title="{{ filename }}">{{ filename }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+{% endif %}

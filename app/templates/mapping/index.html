@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+
+{% block title %}Mapping · partial-server{% endblock %}
+{% block heading %}🔗 Mapping{% endblock %}
+{% block subheading %}Paste a publication listing from the source system and check its 파일명 against the filenames in a folder.{% endblock %}
+
+{% block content %}
+  <div class="parsing-layout">
+    <div class="parsing-main">
+      <div class="card tree-card">
+        <div class="tree-head">
+          <span class="tree-head-label">📚 Corpus</span>
+          <span class="tree-badges" id="tree-root-badges" data-total="{{ total }}">
+            {% if failed %}<span class="pill fail">✗ {{ "{:,}".format(failed) }}</span>{% endif %}
+            <span class="pill total">{{ "{:,}".format(total) }}</span>
+          </span>
+        </div>
+
+        <ul class="tree tree-children" id="tree-root">
+          {% include "mapping/_partials/level.html" %}
+        </ul>
+      </div>
+    </div>
+
+    {#- The check box sits beside the tree. Clicking a folder on the left
+        fills the path input, so the path never has to be typed by hand. -#}
+    <aside class="side-panel">
+      <section class="card side-box" id="check-box">
+        <div class="side-box-head">
+          <span class="side-box-title">🔗 Check mapping</span>
+        </div>
+        <form id="check-form"
+              hx-post="{{ url_for('mapping_check') }}"
+              hx-target="#check-result"
+              hx-swap="innerHTML"
+              hx-indicator="#check-spinner">
+          <label class="group-label" for="map-path">Folder path (prefix)</label>
+          <input type="text" class="group-input" id="map-path" name="path"
+                 placeholder="재정간행물/IMF 또는 재정간행물/월간나라재정/2018년_"
+                 autocomplete="off" spellcheck="false">
+
+          <label class="group-label" for="map-json">Source JSON</label>
+          <textarea class="mapping-json" id="map-json" name="payload" rows="14"
+                    placeholder='[{"유형명": "예산(나라살림)", "파일명": "2026년 나라살림 예산개요.pdf", "게시물ID": 51735, "첨부파일ID": "F00…", "첨부순번": 1}]'
+                    spellcheck="false"></textarea>
+
+          <div class="side-box-actions">
+            <button type="submit" class="btn btn-primary" id="btn-check">
+              ✔ Check
+            </button>
+            {#- Save re-runs the same check server-side and writes only the
+                clean matches, so it is safe even on a stale check result. -#}
+            <button type="button" class="btn btn-primary" id="btn-save"
+                    hx-post="{{ url_for('mapping_save') }}"
+                    hx-target="#check-result"
+                    hx-swap="innerHTML"
+                    hx-indicator="#check-spinner"
+                    hx-confirm="Write 게시물ID · 첨부파일ID · 첨부순번 onto the matched documents?">
+              💾 Save DB
+            </button>
+            <span class="spinner" id="check-spinner"></span>
+          </div>
+        </form>
+        <p class="side-note">
+          The path matches as a <strong>prefix</strong>, so the last part may be
+          unfinished: <code>재정간행물/월간나라재정/2018년_</code> covers every
+          folder starting with <code>2018년_</code>. End the path with
+          <code>/</code> to pin exactly one folder.
+        </p>
+        <p class="side-note">
+          Each entry's <strong>파일명</strong> is compared against the
+          filenames under the path. Underscores and spaces count as the same
+          character and file extensions (<code>.pdf</code>, <code>.hwp</code>, …)
+          are ignored on both sides.
+        </p>
+        <p class="side-note">
+          A 파일명 ending in <code>.zip</code> matches a <strong>folder</strong>
+          named like the archive instead — the zip's PDFs were registered as
+          separate documents. Save then writes the zip's ids onto
+          <strong>every document in that folder</strong>.
+        </p>
+        <p class="side-note">
+          <strong>Save DB</strong> writes 게시물ID → <code>source_document_id</code>,
+          첨부파일ID → <code>atch_file_id</code>, 첨부순번 → <code>atch_file_seq</code>
+          on every cleanly matched document. Not-found and ambiguous entries
+          are skipped, never guessed.
+        </p>
+        <p class="side-note">
+          Both listing formats are accepted: 재정간행물
+          (<code>유형명 · 파일명 · 게시물ID · 첨부파일ID · 첨부순번</code>) and
+          재정보고서 및 문서 (<code>allDtaClsNm · dpFileNm · odtId ·
+          atchFileId · atchFileSeq</code>). There <code>odtId</code> is saved as
+          the 게시물ID and <code>fileExt</code> is joined back onto the name.
+        </p>
+      </section>
+
+      {#- Where the Check button's reply lands. Empty until the first click. -#}
+      <div id="check-result"></div>
+    </aside>
+  </div>
+
+  {#- The viewer pop-up, same as on the documents list. -#}
+  <div id="modal"></div>
+
+  <script src="{{ static_url('js/viewer-modal.js') }}" defer></script>
+  <script src="{{ static_url('js/tree.js') }}" defer></script>
+  <script>
+    // Clicking a folder in the tree also writes its path into the input, so
+    // browsing the corpus and filling the form are the same gesture.
+    document.addEventListener("click", (event) => {
+      const label = event.target.closest(".tree-label");
+      if (!label) return;
+      const node = label.closest(".tree-node");
+      if (!node || !node.dataset.path) return;
+      document.getElementById("map-path").value = node.dataset.path;
+    });
+
+    // The ⧉ button on a folder row copies its path to the clipboard. The
+    // clipboard API needs a secure context, so plain-http use over the LAN
+    // falls back to a selection copy.
+    document.addEventListener("click", async (event) => {
+      const btn = event.target.closest(".btn-copy-path");
+      if (!btn) return;
+      const path = btn.closest(".tree-node").dataset.path;
+      try {
+        await navigator.clipboard.writeText(path);
+      } catch {
+        const ta = document.createElement("textarea");
+        ta.value = path;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+      const original = btn.textContent;
+      btn.textContent = "✓ copied";
+      setTimeout(() => { btn.textContent = original; }, 900);
+    });
+  </script>
+{% endblock %}

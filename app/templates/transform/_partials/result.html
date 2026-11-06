@@ -1,0 +1,38 @@
+{#
+  The outcome of a Migrate click, document by document. transform.js reads
+  data-doc-ids — the documents migrated in full — to disable their rows in
+  the tree, and data-migrated to drop the selection after a run with no
+  failures.
+
+  Errors come back as this card too: the caller is a button on the page, and
+  a 4xx would leave the panel blank.
+#}
+{% if error %}
+  <div class="card check-result is-error">{{ error }}</div>
+{% else %}
+  <div class="card check-result" {% if not result.failed %}data-migrated{% endif %}
+       data-doc-ids="{{ result.completed_ids|join(',') }}">
+    <div class="check-summary">
+      <span class="pill ok">✓ {{ result.succeeded }} migrated</span>
+      {% if result.failed %}<span class="pill fail">✗ {{ result.failed }} failed</span>{% endif %}
+      <span class="pill total">→ {{ result.bucket }}</span>
+    </div>
+    <ul class="migrate-list">
+      {% for m in result.migrations %}
+        <li class="migrate-item {{ 'is-error' if not m.ok }}">
+          <span class="tree-name" title="{{ m.dest_prefix }}">{{ m.filename }}</span>
+          {% if m.ok %}
+            <span class="pill total">{{ m.copied }} object{{ '' if m.copied == 1 else 's' }}</span>
+            {% if m.images %}<span class="pill total">🖼 {{ m.images }}</span>{% endif %}
+            {% if m.missing %}<span class="pill fail" title="{{ m.missing }}">⚠ {{ m.missing }}</span>{% endif %}
+          {% else %}
+            <span class="pill fail" title="{{ m.error }}">✗ {{ m.error }}</span>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+    {% if not result.migrations %}
+      <p class="check-note">Nothing matched the selection any more. Reload the page.</p>
+    {% endif %}
+  </div>
+{% endif %}

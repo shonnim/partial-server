@@ -60,6 +60,18 @@ class Document(Base):
     # The general summary of the whole document, written by the Summarizing
     # run from the level-1 conclusions. NULL until that run has reached it.
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Provenance fields from the source open-data system. NULL for documents
+    # that were uploaded by hand rather than pulled from it.
+    document_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_document_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    atch_file_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    atch_file_seq: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # When the Transform page last migrated this document's folder into the
+    # RAG files bucket, content list included. NULL means never, or only a
+    # partial migration whose parse outputs were missing.
+    migrated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     stage: Mapped[DocumentStage] = mapped_column(
         Enum(DocumentStage, name="document_stage", native_enum=True),
         nullable=False,

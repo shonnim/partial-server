@@ -80,8 +80,7 @@ RAG 시스템 자체가 아니며, 질문에 답하거나 검색 트래픽을 �
 | `VLM_*` | 그림 설명용 비전 모델 (기본값 있음) |
 | `UPSTAGE_API_KEY` | Upstage 임베딩 API 키 |
 | `QDRANT_URL` / `QDRANT_COLLECTION` | Qdrant 주소와 컬렉션 이름 |
-| `DOC_EXTRACT_BASE_URL` | 목차 추출용 doc-extract 서비스 |
-| `MINERU_BASE_URL` | MinerU 파싱 서비스 |
+| `MINERU_BASE_URL` | MinerU 파싱 서비스 (전체 파싱과 목차 추출 공용) |
 
 전체 목록과 기본값은 `app/config.py`를 참고하세요.
 
@@ -224,8 +223,7 @@ Create a `.env` file in the project root with the following variables:
 | `VLM_*` | Vision model for figure descriptions (has defaults) |
 | `UPSTAGE_API_KEY` | Upstage embedding API key |
 | `QDRANT_URL` / `QDRANT_COLLECTION` | Qdrant address and collection name |
-| `DOC_EXTRACT_BASE_URL` | doc-extract service for outline extraction |
-| `MINERU_BASE_URL` | MinerU parsing service |
+| `MINERU_BASE_URL` | MinerU parsing service (shared by full parsing and outline extraction) |
 
 See `app/config.py` for the full list and defaults.
 

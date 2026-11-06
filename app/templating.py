@@ -26,6 +26,8 @@ NAV_ITEMS = (
     {"key": "chunking", "label": "Chunking", "icon": "🧩", "url": "/chunking"},
     {"key": "summarizing", "label": "Summarizing", "icon": "📝", "url": "/summarizing"},
     {"key": "embedding", "label": "Embedding", "icon": "🧲", "url": "/embedding"},
+    {"key": "transform", "label": "Transform", "icon": "📦", "url": "/transform"},
+    {"key": "mapping", "label": "Mapping", "icon": "🔗", "url": "/mapping"},
 )
 
 
