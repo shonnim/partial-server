@@ -98,17 +98,23 @@ def chat_json(
     max_tokens: int = 8000,
     temperature: float = 0.0,
     timeout_seconds: float | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """One chat completion whose content is JSON matching ``schema``.
 
     ``timeout_seconds`` overrides the configured ceiling for a call known to
-    run long. Returns the decoded object. Raises LLMError for anything else.
+    run long. By default the configured text model answers; ``base_url``,
+    ``api_key`` and ``model`` point the same call at another OpenAI-compatible
+    endpoint (the Headers page's model picker). Returns the decoded object.
+    Raises LLMError for anything else.
     """
     settings = get_settings()
     timeout = timeout_seconds if timeout_seconds is not None else settings.llm_timeout_seconds
 
     payload = {
-        "model": settings.llm_model,
+        "model": model or settings.llm_model,
         "temperature": temperature,
         "max_tokens": max_tokens,
         "messages": [
@@ -123,8 +129,8 @@ def chat_json(
 
     content, _ = _complete(
         payload,
-        base_url=settings.llm_base_url,
-        api_key=settings.llm_api_key,
+        base_url=base_url or settings.llm_base_url,
+        api_key=api_key or settings.llm_api_key,
         timeout=timeout,
     )
 

@@ -3,25 +3,36 @@
   has run over it. Eligible documents are listed individually because every
   method works one document at a time — the list is the work queue.
 
-  Under Manual the queue is a to-do list: one paste per row. Under Pages it is
-  live: headers.js walks it top to bottom, posting each row's data-run-url and
-  swapping the reply into its status cell, while the strip above keeps time.
+  Under Manual the queue is a to-do list: one paste per row. Under Pages and
+  Group it is live: headers.js walks it top to bottom, posting each row's
+  data-run-url and swapping the reply into its status cell, while the strip
+  above keeps time. Group rows carry their group id, because that is what
+  picks each document's page range server-side.
 
   data-updates repaints the has_header pills of anything this gate had to check
   on the way in, the same way the plain check does.
 #}
-{% set live = gate.method.value == 'pages' %}
+{% set by_group = gate.method.value == 'group' %}
+{% set live = gate.method.value in ('pages', 'group') %}
 <div class="card check-result"
      data-updates='{{ gate.updates|tojson }}'
-     {% if live %}data-run="pages" data-start-page="{{ start_page }}" data-end-page="{{ end_page }}"{% endif %}>
+     {% if live %}data-run="pages" data-llm="{{ llm }}"{% endif %}
+     {% if by_group %}data-use-group="1"{% elif live %}data-start-page="{{ start_page }}" data-end-page="{{ end_page }}"{% endif %}>
   <div class="check-summary">
     <span class="pill total">method: {{ gate.method.label }}</span>
-    {% if live %}
+    {% if by_group %}
+      <span class="pill total" title="each document's page range comes from its group's strategy; no group means the default range">🏷 per-group page ranges</span>
+      <span class="pill total" title="the model every extraction of this run is sent to, unless a group's strategy names its own">🧠 {{ llm_label }}</span>
+    {% elif live %}
       <span class="pill total" title="PDF pages to parse, as a viewer numbers them">p. {{ start_page }}–{{ end_page }}</span>
+      <span class="pill total" title="the model every extraction of this run is sent to">🧠 {{ llm_label }}</span>
     {% endif %}
     <span class="pill ok">✓ {{ gate.eligible|length }} eligible</span>
     {% if gate.skipped %}
       <span class="pill total">↷ {{ gate.skipped|length }} skipped, no header</span>
+    {% endif %}
+    {% if gate.stored %}
+      <span class="pill total" title="tick Force get header to re-extract them">↷ {{ gate.stored|length }} skipped, headers already stored</span>
     {% endif %}
     {% if gate.checked_now %}
       <span class="pill total">🔍 {{ gate.checked_now }} checked just now</span>
@@ -51,6 +62,13 @@
         <li class="gate-row"
             {% if live %}data-run-url="{{ url_for('header_pages_run', document_id=candidate.id) }}"{% endif %}>
           <span class="gate-name" title="{{ candidate.filename }}">{{ candidate.filename }}</span>
+          {% if by_group %}
+            {% if candidate.group_id %}
+              <span class="pill group" title="group id — picks this document's strategy">🏷 {{ candidate.group_id }}</span>
+            {% else %}
+              <span class="pill total" title="no group id — the default strategy applies">no group</span>
+            {% endif %}
+          {% endif %}
           <span class="gate-status">
             {% if live %}
               <span class="pill total">queued</span>
@@ -69,6 +87,8 @@
         </li>
       {% endfor %}
     </ul>
+  {% elif gate.stored %}
+    <p class="check-note">Headers are already stored for everything left in this selection — tick <strong>force get header</strong> to re-extract them.</p>
   {% else %}
     <p class="check-note">Nothing in this selection has a contents page to read.</p>
   {% endif %}

@@ -36,6 +36,7 @@
   --tint-manual: #8a5cd6;
   --tint-outline: #1f8a8a;
   --tint-ai: #c026d3;
+  --tint-transfer: #0e7490;
 
   /* Outline depth. Level 1 is the strongest; each step down loses saturation,
      so nesting reads as distance from the trunk rather than as five unrelated
@@ -401,6 +402,7 @@ table.docs tbody tr:hover { background: var(--accent-tint); }
 .btn-manual { --btn-tint: var(--tint-manual); }
 .btn-outline { --btn-tint: var(--tint-outline); }
 .btn-ai { --btn-tint: var(--tint-ai); }
+.btn-transfer { --btn-tint: var(--tint-transfer); }
 
 /* A Headers button with nothing behind it stays legible but stops advertising
    itself, so a folder of untouched documents does not look finished. */
@@ -410,13 +412,13 @@ table.docs tbody tr:hover { background: var(--accent-tint); }
   color: var(--ink-faint);
 }
 
-.btn-pdf, .btn-json, .btn-md, .btn-manual, .btn-outline, .btn-ai {
+.btn-pdf, .btn-json, .btn-md, .btn-manual, .btn-outline, .btn-ai, .btn-transfer {
   border-color: color-mix(in srgb, var(--btn-tint) 26%, #fff);
   background: color-mix(in srgb, var(--btn-tint) 7%, #fff);
   color: var(--btn-tint);
 }
 .btn-pdf:hover, .btn-json:hover, .btn-md:hover,
-.btn-manual:hover, .btn-outline:hover, .btn-ai:hover {
+.btn-manual:hover, .btn-outline:hover, .btn-ai:hover, .btn-transfer:hover {
   border-color: color-mix(in srgb, var(--btn-tint) 52%, #fff);
   background: color-mix(in srgb, var(--btn-tint) 14%, #fff);
 }
@@ -869,6 +871,15 @@ dialog.modal::backdrop { background: rgba(30, 35, 66, .46); backdrop-filter: blu
    nothing rather than saying zero. */
 .header-count:empty { display: none; }
 
+/* ---------- headers page ---------- */
+
+/* The headers tree rows carry the most badges and buttons of any page, so
+   the corpus text steps down a size. The narrower side column lives next to
+   .parsing-layout, whose cascade it has to follow. */
+.headers-layout .tree-card .tree-name { font-size: 12px; }
+.headers-layout .tree-card .pill { font-size: 10px; }
+.headers-layout .tree-card .tree-view { height: 24px; padding: 0 7px; font-size: 11px; }
+
 /* ---------- method picker ---------- */
 
 .method-picker { display: flex; align-items: center; gap: 7px; }
@@ -879,6 +890,15 @@ dialog.modal::backdrop { background: rgba(30, 35, 66, .46); backdrop-filter: blu
   text-transform: uppercase;
 }
 .method-picker select { height: 32px; font-size: 12.5px; }
+
+/* The Force toggle on the Headers box: a checkbox in the toolbar's voice. */
+.force-picker {
+  cursor: pointer;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  user-select: none;
+}
+.force-picker input { accent-color: var(--accent); }
 
 /* ---------- extraction queue ---------- */
 
@@ -1116,6 +1136,123 @@ dialog.modal-manual { width: min(820px, 94vw); height: min(700px, 88vh); }
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+/* ---------- transfer pop-up ---------- */
+
+/* Two outlines side by side: stored headers on the left, the bucket's TOC on
+   the right. Both reuse the outline rows above, so comparing is just reading
+   across. */
+dialog.modal-transfer { width: min(1300px, 96vw); height: min(860px, 92vh); }
+
+.transfer-body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 1fr 1fr;
+  min-height: 0;
+}
+.transfer-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.transfer-pane + .transfer-pane { border-left: 1px solid var(--line); }
+
+.transfer-pane-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-soft);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+/* The ~ marker on a TOC row whose heading the pipeline never located: the
+   indexes are inferred, worth a glance before transforming them. */
+.outline-unmatched { flex: 0 0 auto; }
+
+/* What the Stored pane disagrees with the bucket TOC on: the characters of a
+   title, a page number, an index. On an idx-missing row the ground is already
+   red, so the mark switches to white with an underline to stay visible. */
+.diff-red { color: #dc2626; font-weight: 750; }
+.outline-row.idx-missing .diff-red { color: #fff; text-decoration: underline 2px; }
+
+.transfer-pane-head .diff-note {
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+/* Each pane's own Edit / Save / Cancel, pinned to its right edge. Save and
+   Cancel appear only while that pane — and only that pane — is editing. */
+.transfer-pane-head .pane-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.transfer-pane [data-save-pane],
+.transfer-pane [data-cancel-pane] { display: none; }
+.transfer-pane.is-editing [data-save-pane],
+.transfer-pane.is-editing [data-cancel-pane] { display: inline-flex; }
+.transfer-pane.is-editing [data-edit-pane] { display: none; }
+
+/* Edit mode swaps a row's title and pills for inputs — scoped to the pane, so
+   the other pane keeps reading normally. */
+.outline-edit {
+  display: none;
+  flex: 1;
+  min-width: 0;
+  align-items: baseline;
+  gap: 4px;
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+.transfer-pane.is-editing .outline-edit { display: flex; }
+.transfer-pane.is-editing .outline-title,
+.transfer-pane.is-editing .outline-page,
+.transfer-pane.is-editing .outline-idx,
+.transfer-pane.is-editing .outline-unmatched { display: none; }
+
+.title-input {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+}
+.title-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* The per-row delete on the bucket pane: quiet until the row is hovered, so a
+   column of ✕ does not shout over the TOC it exists to prune. Hidden while
+   the pane is editing — a delete there would throw typed edits away. */
+.row-delete {
+  flex: 0 0 auto;
+  align-self: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.outline-row:hover .row-delete {
+  border-color: color-mix(in srgb, #dc2626 30%, #fff);
+  background: color-mix(in srgb, #dc2626 7%, #fff);
+  color: #dc2626;
+}
+.outline-row.idx-missing .row-delete { color: #fff; }
+.transfer-pane.is-editing .row-delete { display: none; }
+
 /* ---------- responsive ---------- */
 
 @media (max-width: 1100px) {
@@ -1227,6 +1364,13 @@ dialog.modal-manual { width: min(820px, 94vw); height: min(700px, 88vh); }
 @media (max-width: 1100px) {
   .parsing-layout { grid-template-columns: 1fr; }
   .side-panel { position: static; }
+}
+
+/* The Headers page hands some of the side box's width back to the tree; the
+   rules sit after the block above so they win its cascade at both widths. */
+.headers-layout { grid-template-columns: minmax(0, 1fr) 260px; }
+@media (max-width: 1100px) {
+  .headers-layout { grid-template-columns: 1fr; }
 }
 
 .side-box {
@@ -1540,6 +1684,19 @@ select.group-input { height: 36px; cursor: pointer; }
 }
 .chunk-report.is-skipped .chunk-report-name { color: var(--ink-soft); font-weight: 500; }
 .chunk-report-reason { color: var(--ink-soft); font-size: 12px; }
+.chunk-report-reason.is-alert { color: var(--fail); }
+/* The banner a queue raises over a skip that is a real problem, not a no-op:
+   e.g. a selected file with a header the Summarize run could only fail on. */
+.queue-alert {
+  margin: 10px 0 2px;
+  padding: 8px 12px;
+  border: 1px solid var(--fail);
+  border-radius: 8px;
+  background: var(--fail-soft);
+  color: var(--fail);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
 .chunk-warnings {
   margin: 6px 0 0;
   padding-left: 18px;
@@ -1815,3 +1972,83 @@ dialog.modal-upload {
 }
 .upload-reason { color: var(--fail); }
 .upload-error { margin: 0; color: var(--fail); font-size: 12.5px; }
+
+/* ---------- transform ---------- */
+
+/* A document already copied into the RAG files bucket, on its row and
+   counted up the folders above it. */
+.pill.migrated {
+  background: color-mix(in srgb, var(--accent) 12%, #fff);
+  color: var(--accent);
+}
+.migrated-cell:empty { display: none; }
+
+/* Migrate: filled like the one action the panel performs, and visibly busy
+   for as long as the request it started is in flight. */
+.btn-migrate { --btn-tint: var(--accent); }
+.btn-primary.btn-migrate.is-loading[disabled] {
+  background: color-mix(in srgb, var(--accent) 62%, #fff);
+  color: #fff;
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+#migrate-result .check-result { margin-bottom: 0; }
+
+/* The per-document report under the summary: one row per migrated document,
+   its destination folder on the name's tooltip. A long run scrolls inside the
+   card instead of stretching the sticky side panel past the viewport. */
+.migrate-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.migrate-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.migrate-item .tree-name {
+  flex: 1 1 100%;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.migrate-item .pill { word-break: break-word; white-space: normal; text-align: left; }
+.migrate-item.is-error .tree-name { color: var(--fail); }
+
+/* ---------- Mapping ---------- */
+
+/* The pasted-JSON box: same chrome as the other inputs, but monospace and
+   tall, because what lands in it is a few hundred lines of source JSON. */
+.mapping-json {
+  width: 100%;
+  min-height: 220px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  resize: vertical;
+}
+.mapping-json::placeholder { color: var(--ink-faint); }
+.mapping-json:hover { border-color: #d2d8ec; }
+.mapping-json:focus {
+  outline: none;
+  background: var(--panel);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+#check-result .check-result { margin-bottom: 0; }

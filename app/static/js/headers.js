@@ -12,6 +12,18 @@
     return select ? select.value : "manual";
   };
 
+  /** Whether the Force toggle is on: stored documents are selectable again. */
+  window.headerForce = () => {
+    const box = document.getElementById("force-get-header");
+    return Boolean(box && box.checked);
+  };
+
+  /** The model chosen in the toolbar's LLM picker. */
+  window.headerLLM = () => {
+    const select = document.getElementById("header-llm");
+    return select ? select.value : "";
+  };
+
   /** The page range the Pages method sends to the parser, as form values. */
   window.headerPageRange = () => {
     const value = (id) => {
@@ -47,10 +59,66 @@
   document.addEventListener("DOMContentLoaded", syncMethod);
   if (document.readyState !== "loading") syncMethod();
 
+  // ---- the Force toggle ------------------------------------------------------
+
+  // Ticking Force hands the opted-out rows back to the selection: every
+  // disabled box in the tree — stored documents, and the folders that went
+  // with them — is enabled, remembering on the element the disabled state it
+  // returns to when the toggle is cleared. Rows that load or finish while
+  // the toggle is on are swept the same way, so no box stays disabled under
+  // Force.
+
+  /** Enable every disabled box in `scope`; returns the boxes released now. */
+  function releaseBoxes(scope) {
+    const released = [];
+    scope.querySelectorAll(".tree-check:disabled").forEach((box) => {
+      box.dataset.forceReleased = "1";
+      box.dataset.heldTitle = box.title;
+      box.disabled = false;
+      box.title = "";
+      released.push(box);
+    });
+    return released;
+  }
+
+  /** Put every released box back the way the tree had it. */
+  function restoreBoxes() {
+    const fileNodes = [];
+    document.querySelectorAll(".tree-check[data-force-released]").forEach((box) => {
+      box.disabled = true;
+      box.checked = false;
+      box.indeterminate = false;
+      box.title = box.dataset.heldTitle || "";
+      delete box.dataset.forceReleased;
+      delete box.dataset.heldTitle;
+      const node = box.closest(".tree-node");
+      if (node && node.classList.contains("is-file")) fileNodes.push(node);
+    });
+    return fileNodes;
+  }
+
+  document.addEventListener("change", (event) => {
+    if (event.target.id !== "force-get-header") return;
+    const root = document.getElementById("tree-root");
+    if (!root || !window.refreshTreeCounts) return;
+
+    if (event.target.checked) {
+      releaseBoxes(root);
+      window.refreshTreeCounts();
+    } else {
+      // Folder states are re-derived per restored document rather than
+      // trusted from the stash: extraction may have stored headers for more
+      // documents while the toggle was on, which can take a folder that was
+      // selectable before out of the selection now.
+      restoreBoxes().forEach((node) => window.refreshTreeCounts(node));
+      window.refreshTreeCounts();
+    }
+  });
+
   // ---- repainting ----------------------------------------------------------
 
   const PILLS = {
-    YES: '<span class="pill ok">✓ yes header</span>',
+    YES: '<span class="pill ok" title="has a contents page">✓</span>',
     NO: '<span class="pill total">— no header</span>',
   };
 
@@ -102,11 +170,24 @@
 
     const box = row.querySelector(":scope > .tree-row > .tree-check");
     if (box) {
-      box.disabled = count > 0;
-      box.title = count
-        ? `${plural(count, "header")} already stored — use Manual to redo them`
+      const held = count
+        ? `${plural(count, "header")} already stored — tick Force get header or use Manual to redo them`
         : "";
-      if (box.disabled) box.checked = false;
+      if (count && window.headerForce()) {
+        // Under Force the row stays selectable; what it keeps is the disabled
+        // state to fall back to when the toggle is cleared. The tick still
+        // comes off — the document just finished, and leaving it ticked would
+        // feed it straight into the next batch.
+        box.dataset.forceReleased = "1";
+        box.dataset.heldTitle = held;
+        box.checked = false;
+      } else {
+        delete box.dataset.forceReleased;
+        delete box.dataset.heldTitle;
+        box.disabled = count > 0;
+        box.title = held;
+        if (box.disabled) box.checked = false;
+      }
     }
     if (window.refreshTreeCounts) window.refreshTreeCounts(row);
   }
@@ -140,10 +221,20 @@
     const tally = strip.querySelector("[data-run-tally]");
     const stop = strip.querySelector("[data-run-stop]");
     const button = document.getElementById("btn-get-header");
-    const range = {
-      start_page: card.dataset.startPage || "",
-      end_page: card.dataset.endPage || "",
-    };
+    // The pick made when Get Header was pressed, pinned onto the card: the
+    // whole run uses it even if the toolbar changes mid-queue. Under the
+    // Group method no range is sent — the server reads each document's own
+    // group strategy instead.
+    const range = card.dataset.useGroup
+      ? {
+          use_group: "true",
+          ...(card.dataset.llm ? { llm: card.dataset.llm } : {}),
+        }
+      : {
+          start_page: card.dataset.startPage || "",
+          end_page: card.dataset.endPage || "",
+          ...(card.dataset.llm ? { llm: card.dataset.llm } : {}),
+        };
 
     const run = { stopped: false, current: null, started: performance.now() };
     activeRun = run;
@@ -289,6 +380,60 @@
     return JSON.stringify(edits);
   };
 
+  // ---- the transfer pop-up's two editors ------------------------------------
+
+  /** One pane's rows as the server wants them, keyed by `keyAttr`'s value.
+   *
+   *  Each pane of the Transfer pop-up edits and saves on its own: the bucket
+   *  pane's rows carry data-toc-seq, the Stored pane's data-header-id, and a
+   *  Save serialises only its own pane.
+   */
+  function paneEdits(pane, keyAttr) {
+    const edits = {};
+    pane.querySelectorAll(`[${keyAttr}]`).forEach((row) => {
+      const number = (selector) => {
+        const input = row.querySelector(selector);
+        const value = input ? input.value.trim() : "";
+        return value === "" ? null : Number(value);
+      };
+      const title = row.querySelector("[data-edit-title]");
+      edits[row.getAttribute(keyAttr)] = {
+        title: title ? title.value : null,
+        page: number("[data-page-start]"),
+        start: number("[data-idx-start]"),
+        end: number("[data-idx-end]"),
+      };
+    });
+    return JSON.stringify(edits);
+  }
+
+  window.transferTocEdits = () => {
+    const pane = document.querySelector('#modal [data-pane="toc"]');
+    return pane ? paneEdits(pane, "data-toc-seq") : "{}";
+  };
+
+  window.transferStoredEdits = () => {
+    const pane = document.querySelector('#modal [data-pane="stored"]');
+    return pane ? paneEdits(pane, "data-header-id") : "{}";
+  };
+
+  document.addEventListener("click", (event) => {
+    const pane = event.target.closest(".transfer-pane");
+    if (!pane) return;
+
+    if (event.target.closest("[data-edit-pane]")) {
+      pane.classList.add("is-editing");
+      const first = pane.querySelector("[data-edit-title]");
+      if (first) first.focus();
+    } else if (event.target.closest("[data-cancel-pane]")) {
+      pane.classList.remove("is-editing");
+      // Back out whatever was typed: the boxes return to the rendered values.
+      pane.querySelectorAll(".idx-input, .title-input").forEach((input) => {
+        input.value = input.defaultValue;
+      });
+    }
+  });
+
   document.addEventListener("click", (event) => {
     const dialog = event.target.closest("dialog");
     if (!dialog) return;
@@ -308,6 +453,34 @@
 
   document.body.addEventListener("htmx:afterSwap", (event) => {
     const target = event.detail.target;
+
+    // A level that loads while Force is on arrives with its stored rows
+    // disabled; sweep them into the selection like everything already on
+    // screen. tree.js's own handler has run first (it registered first) and
+    // passed a checked folder's tick down to the selectable rows — the rows
+    // released here take the same tick, so a folder checked under Force
+    // keeps meaning "everything beneath it".
+    if (window.headerForce()) {
+      const list = target.classList.contains("tree-children")
+        ? target
+        : target.closest(".tree-children");
+      if (list) {
+        releaseBoxes(list).forEach((box) => {
+          const node = box.closest(".tree-node");
+          const parent =
+            node && node.parentElement && node.parentElement.closest(".tree-node");
+          const parentBox =
+            parent && parent.querySelector(":scope > .tree-row > .tree-check");
+          if (parentBox && parentBox.checked && !parentBox.indeterminate) {
+            box.checked = true;
+          }
+        });
+        if (window.refreshTreeCounts) {
+          window.refreshTreeCounts(list.closest(".tree-node"));
+        }
+        return;
+      }
+    }
 
     if (target.id === "header-result") {
       const result = target.querySelector("[data-updates]");

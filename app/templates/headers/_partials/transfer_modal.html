@@ -1,0 +1,225 @@
+{#
+  The Transfer pop-up: the RAG bucket's TOC on the left, what the headers
+  table holds on the right, so the two can be compared before either transfer
+  button writes one side into the other — "Transfer to Stored Headers ⇒"
+  upserts the bucket TOC into the table, "⇐ Transfer to Bucket TOC" replaces
+  the metadata JSON's TOC with the stored headers (confirmed first, since the
+  pipeline's TOC entries are discarded).
+
+  Both panes use the same row markup as the outline pop-up — title, printed
+  page, start–end page_idx — and a row missing either index is tinted red the
+  same way. On the Stored side, anything that disagrees with the bucket TOC is
+  painted red at the point of disagreement: the differing characters of a
+  title, a printed page, either page index. A stored header the TOC does not
+  name at all is wholly red — a transform would not touch it.
+
+  Each pane also has its own Edit mode (headers.js toggles .is-editing on the
+  pane): every row's title and three numbers become inputs, and Save posts the
+  pane's rows to that pane's own route — the bucket pane rewrites the metadata
+  JSON, the Stored pane the headers rows. The two editors never touch each
+  other's side. Rows are keyed by data-toc-seq (preorder position in the TOC)
+  on the left and data-header-id on the right; headers.js serialises whichever
+  pane is being saved.
+
+  `diffs` maps header id → HeaderDiff and exists only when a TOC was read; the
+  bucket pane passes no diffs and renders plainly.
+
+  data-doc-id / data-header-count let headers.js refresh the tree row's count
+  without a reload, the same as after an extraction.
+#}
+{#- delete_url is set only for the bucket pane: each of its rows then carries
+    a ✕ that removes the heading (with its sub-headings) from the metadata
+    JSON, confirmed first — macros do not see the template context, so the
+    URL comes in as an argument. -#}
+{% macro branch(nodes, diffs=none, delete_url=none) -%}
+  <ul class="outline-list">
+    {% for node in nodes %}
+      {% set diff = diffs.get(node.id) if diffs else none %}
+      <li class="outline-node lvl-{{ node.level if node.level <= 5 else 5 }}">
+        <div class="outline-row{% if node.start_page_idx is none or node.end_page_idx is none %} idx-missing{% endif %}">
+          <span class="outline-rail"></span>
+          <span class="outline-title"{% if diff and diff.missing %} title="not in the bucket TOC — a transform leaves this row as it is"{% endif %}>
+            {%- if diff -%}
+              {%- for seg in diff.segments -%}
+                {%- if seg.differs -%}<span class="diff-red">{{ seg.text }}</span>{%- else -%}{{ seg.text }}{%- endif -%}
+              {%- endfor -%}
+            {%- else -%}{{ node.title }}{%- endif -%}
+          </span>
+          {% if node.matched is defined and not node.matched %}
+            <span class="pill total outline-unmatched"
+                  title="the pipeline did not locate this heading in the content list — its indexes are inferred">~</span>
+          {% endif %}
+          {% if node.start_page is not none %}
+            <span class="pill total outline-page" title="printed page number">p.
+              {%- if diff and diff.page_differs %} <span class="diff-red">{{ node.start_page }}</span>
+              {%- else %} {{ node.start_page }}{% endif %}</span>
+          {% endif %}
+          <span class="pill total outline-idx" title="content list page_idx, start–end">
+            idx
+            {%- if diff and diff.start_idx_differs %} <span class="diff-red">{{ node.start_page_idx if node.start_page_idx is not none else '?' }}</span>
+            {%- else %} {{ node.start_page_idx if node.start_page_idx is not none else '?' }}{% endif -%}
+            –
+            {%- if diff and diff.end_idx_differs %}<span class="diff-red">{{ node.end_page_idx if node.end_page_idx is not none else '?' }}</span>
+            {%- else %}{{ node.end_page_idx if node.end_page_idx is not none else '?' }}{% endif %}
+          </span>
+          {#- The row as inputs, shown only while this pane is in Edit mode.
+              The key attribute is what Save sends the row back under. -#}
+          <span class="outline-edit"
+                {% if node.seq is defined %}data-toc-seq="{{ node.seq }}"{% else %}data-header-id="{{ node.id }}"{% endif %}>
+            <input type="text" class="title-input" data-edit-title
+                   value="{{ node.title }}" aria-label="header title">
+            <span class="idx-edit-label">p.</span>
+            <input type="number" class="idx-input" data-page-start min="0" step="1"
+                   value="{{ node.start_page if node.start_page is not none else '' }}"
+                   placeholder="?" aria-label="printed page number">
+            <span class="idx-edit-label">idx</span>
+            <input type="number" class="idx-input" data-idx-start min="0" step="1"
+                   value="{{ node.start_page_idx if node.start_page_idx is not none else '' }}"
+                   placeholder="?" aria-label="start page_idx">
+            <span class="idx-edit-label">–</span>
+            <input type="number" class="idx-input" data-idx-end min="0" step="1"
+                   value="{{ node.end_page_idx if node.end_page_idx is not none else '' }}"
+                   placeholder="?" aria-label="end page_idx">
+          </span>
+          {% if node.children %}
+            <span class="pill total outline-kids">{{ node.children|length }} ↓</span>
+          {% endif %}
+          {% if delete_url and node.seq is defined %}
+            <button type="button" class="row-delete"
+                    title="delete this heading from the bucket TOC"
+                    hx-post="{{ delete_url }}"
+                    hx-vals='{"seq": {{ node.seq }}}'
+                    hx-confirm="Delete “{{ node.title }}”{% if node.children %} and its {{ node.children|length }} sub-heading{{ '' if node.children|length == 1 else 's' }}{% endif %} from the bucket TOC?"
+                    hx-target="#modal"
+                    hx-swap="innerHTML"
+                    hx-indicator="#transfer-spinner">✕</button>
+          {% endif %}
+        </div>
+        {% if node.children %}{{ branch(node.children, diffs, delete_url) }}{% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+{%- endmacro %}
+
+<dialog class="modal modal-transfer" aria-label="Transfer TOC"
+        data-doc-id="{{ doc.id }}" data-header-count="{{ total }}">
+  <header class="modal-head">
+    <strong class="modal-title" title="{{ doc.filename }}">{{ doc.filename }}</strong>
+    <span class="modal-actions">
+      {% if outcome %}
+        <span class="pill ok">✓ {{ outcome.updated }} updated · {{ outcome.inserted }} inserted → {{ outcome_target }}</span>
+        {% if outcome.untouched %}
+          <span class="pill total"
+                title="rows the other side does not name; left as they were">{{ outcome.untouched }} untouched</span>
+        {% endif %}
+      {% endif %}
+      {% if notice %}
+        <span class="pill ok">✓ {{ notice }}</span>
+      {% endif %}
+      <span class="spinner" id="transfer-spinner"></span>
+      {#- One button per direction: toward the table an upsert, toward the
+          bucket a replace of the whole TOC. -#}
+      {% if roots %}
+        <button type="button" class="btn btn-transfer"
+                title="replace the metadata JSON's TOC with the stored headers"
+                hx-post="{{ url_for('header_transfer_to_bucket', document_id=doc.id) }}"
+                hx-confirm="Replace the bucket TOC with the {{ total }} stored header{{ '' if total == 1 else 's' }}? Its current entries will be removed."
+                hx-target="#modal"
+                hx-swap="innerHTML"
+                hx-indicator="#transfer-spinner">⇐ Transfer to Bucket TOC</button>
+      {% else %}
+        <button type="button" class="btn btn-transfer" disabled
+                title="No stored headers to transfer">⇐ Transfer to Bucket TOC</button>
+      {% endif %}
+      {% if toc %}
+        <button type="button" class="btn btn-primary"
+                title="write the bucket TOC into the stored headers"
+                hx-post="{{ url_for('header_transfer_apply', document_id=doc.id) }}"
+                hx-target="#modal"
+                hx-swap="innerHTML"
+                hx-indicator="#transfer-spinner">Transfer to Stored Headers ⇒</button>
+      {% else %}
+        <button type="button" class="btn btn-primary" disabled
+                title="No TOC to transfer">Transfer to Stored Headers ⇒</button>
+      {% endif %}
+      <button type="button" class="btn" data-close-modal>Close</button>
+    </span>
+  </header>
+
+  {% if edit_error %}
+    <p class="parsed-error">⚠ {{ edit_error }}</p>
+  {% endif %}
+
+  <div class="transfer-body">
+    <section class="transfer-pane" data-pane="toc">
+      <header class="transfer-pane-head">
+        <span>🪣 Bucket TOC</span>
+        {% if toc %}
+          <span class="pill headers">{{ toc.total }}</span>
+          {% if toc.method %}<span class="pill total" title="how the pipeline found the TOC">{{ toc.method }}</span>{% endif %}
+          {% if toc.confidence is not none %}
+            <span class="pill total" title="the pipeline's confidence">{{ '%.0f'|format(toc.confidence * 100) }}%</span>
+          {% endif %}
+          {% if toc.valid is false %}<span class="pill fail" title="the pipeline marked this TOC as not valid">not valid</span>{% endif %}
+          <span class="pane-actions">
+            <button type="button" class="btn" data-edit-pane>Edit</button>
+            <button type="button" class="btn btn-primary" data-save-pane
+                    hx-post="{{ url_for('header_transfer_toc_update', document_id=doc.id) }}"
+                    hx-vals="js:{edits: window.transferTocEdits()}"
+                    hx-target="#modal"
+                    hx-swap="innerHTML"
+                    hx-indicator="#transfer-spinner">Save</button>
+            <button type="button" class="btn ghost" data-cancel-pane>Cancel</button>
+          </span>
+        {% endif %}
+      </header>
+      {% if toc %}
+        {% if toc.warnings %}
+          <p class="parsed-error" title="{{ toc.warnings|join('\n') }}">
+            ⚠ {{ toc.warnings|length }} pipeline warning{{ '' if toc.warnings|length == 1 else 's' }}:
+            {{ toc.warnings[0] }}
+          </p>
+        {% endif %}
+        <div class="outline-body">
+          {{ branch(toc.roots, none, url_for('header_transfer_toc_delete', document_id=doc.id)) }}
+        </div>
+      {% else %}
+        <div class="outline-body">
+          <p class="check-note">⚠ {{ toc_error }}</p>
+        </div>
+      {% endif %}
+    </section>
+
+    <section class="transfer-pane" data-pane="stored">
+      <header class="transfer-pane-head">
+        <span>💾 Stored headers</span>
+        <span class="pill headers">{{ total }}</span>
+        {% if roots and toc %}
+          <span class="diff-note">differences with the bucket TOC read <span class="diff-red">red</span></span>
+        {% endif %}
+        {% if roots %}
+          <span class="pane-actions">
+            <button type="button" class="btn" data-edit-pane>Edit</button>
+            <button type="button" class="btn btn-primary" data-save-pane
+                    hx-post="{{ url_for('header_transfer_stored_update', document_id=doc.id) }}"
+                    hx-vals="js:{edits: window.transferStoredEdits()}"
+                    hx-target="#modal"
+                    hx-swap="innerHTML"
+                    hx-indicator="#transfer-spinner">Save</button>
+            <button type="button" class="btn ghost" data-cancel-pane>Cancel</button>
+          </span>
+        {% endif %}
+      </header>
+      <div class="outline-body">
+        {% if roots %}
+          {{ branch(roots, diffs) }}
+        {% else %}
+          <p class="check-note">
+            No headers stored for this document yet — Transfer to Stored
+            Headers will insert the whole TOC on the left.
+          </p>
+        {% endif %}
+      </div>
+    </section>
+  </div>
+</dialog>

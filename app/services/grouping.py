@@ -14,6 +14,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.models.document import Document
+from app.services.chunking import CHUNKERS
+from app.services.header_pages import GROUP_STRATEGIES
 
 # Documents one Save click may stamp. Folder ticks are resolved server-side
 # before this cap is applied, so it bounds the UPDATE rather than the ids the
@@ -84,3 +86,14 @@ def group_ids_in_use(db: Session, *, limit: int = 200) -> list[str]:
         .limit(limit)
     ).scalars()
     return list(rows)
+
+
+def suggested_group_ids(db: Session) -> list[str]:
+    """What the group id input offers: labels in use, plus registered ones.
+
+    A group id some stage has a strategy for — header extraction's
+    GROUP_STRATEGIES, chunking's CHUNKERS — is offered before any document
+    carries it, so a fresh corpus can be labelled straight into its strategy
+    without retyping the id from memory.
+    """
+    return sorted({*group_ids_in_use(db), *GROUP_STRATEGIES, *CHUNKERS})

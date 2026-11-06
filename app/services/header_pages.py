@@ -18,13 +18,17 @@ reported as failed with the reason, and no headers are written.
 import re
 import time
 import uuid
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.doc_extract import DocExtractError, parse_pages
 from app.models.document import Document, HasHeader
+from app.services.header_bpa import locate_toc, page_index_ranges_bpa, parse_toc
 from app.services.header_extraction import (
+    ExtractedHeader,
     ExtractionError,
     extract_headers,
     save_headers,
@@ -45,6 +49,67 @@ MAX_PAGE_SPAN = 10
 # The whole PDF is uploaded to the parsing service, whichever pages it is
 # asked for, so a source file has to fit in memory here first.
 MAX_PDF_BYTES = 200 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class GroupStrategy:
+    """How the Group method reads one group's contents pages.
+
+    Documents of one group share a layout, so they share where the contents
+    page sits. ``llm`` names the model every extraction of the group is sent
+    to; None means the toolbar's pick stands.
+
+    A group whose TOC is regular enough to parse without a model sets the
+    hooks: ``locate`` reads the TOC's own page range off the document's
+    content list (1-based viewer pages; None falls back to the static range),
+    ``extract`` takes the parsed pages' markdown — whole, not cut by
+    ``contents_section`` — and returns the ordered headings, and ``ranges``
+    replaces ``page_index_ranges`` with the group's own page arithmetic. A
+    strategy with its own ``extract`` also skips the contents-marker gate:
+    its parser validates the pages far more strictly than a marker word, and
+    this series renders the marker as a running header the pages-parse
+    markdown drops. Any hook may be set alone; unset means the default step.
+    """
+
+    start_page: int
+    end_page: int
+    llm: str | None = None
+    locate: Callable[[Any], tuple[int, int] | None] | None = None
+    extract: Callable[[str], list[ExtractedHeader]] | None = None
+    ranges: (
+        Callable[[Sequence[ExtractedHeader], Any], list[tuple[int | None, int | None]]]
+        | None
+    ) = None
+
+
+# What a document with no group — or a group with no entry below — gets under
+# the Group method: the same defaults the Pages method starts from. This is
+# the default way; everything extracted before groups existed went through it.
+DEFAULT_STRATEGY = GroupStrategy(DEFAULT_START_PAGE, DEFAULT_END_PAGE)
+
+# The strategy for each group id, the way chunking's CHUNKERS maps a group to
+# the class that knows its layout. Add an entry here once a group's contents
+# page location has been tuned on a few of its documents.
+GROUP_STRATEGIES: dict[str, GroupStrategy] = {
+    # NABO 예산안 부처별 분석: a multi-page TOC behind the cover, inner title
+    # page and 발간사, parsed by pattern rather than by model — see
+    # app/services/header_bpa.py for the layout. The static range is only the
+    # fallback for a content list locate_toc cannot read.
+    "bpa-1": GroupStrategy(
+        start_page=3,
+        end_page=12,
+        locate=locate_toc,
+        extract=parse_toc,
+        ranges=page_index_ranges_bpa,
+    ),
+}
+
+
+def strategy_for(group_id: str | None) -> GroupStrategy:
+    """The strategy a document's group prescribes, or the default."""
+    if group_id is None:
+        return DEFAULT_STRATEGY
+    return GROUP_STRATEGIES.get(group_id, DEFAULT_STRATEGY)
 
 # A markdown heading line, and a line that ends the way a contents entry does:
 # with a page number, optionally after dot leaders.
@@ -146,12 +211,22 @@ def contents_section(markdown: str) -> str:
 
 
 def run_pages(
-    db: Session, document: Document, start_page: int, end_page: int
+    db: Session,
+    document: Document,
+    start_page: int,
+    end_page: int,
+    llm: str | None = None,
+    strategy: GroupStrategy | None = None,
 ) -> PagesResult:
     """Extract and store the headers of one document from its PDF pages.
 
     ``start_page`` and ``end_page`` are 1-based and inclusive; the parser gets
     them one lower, as its 0-based ``start_page_id`` and ``end_page_id``.
+    ``llm`` is the page picker's value, handed on to ``extract_headers``.
+    ``strategy`` carries a group's hooks, when the Group method found any: a
+    custom ``extract`` gets the markdown whole and replaces the model call,
+    and a custom ``ranges`` replaces the content-list matching with the
+    group's own page arithmetic.
     """
 
     def failed(
@@ -177,11 +252,18 @@ def run_pages(
     if document.has_header is not HasHeader.YES:
         return failed("not marked as having a contents page — run Has Header first")
 
-    # The content list fills each header's page indexes when it is saved; the
-    # range itself comes from the toolbar, not from here.
+    # The content list fills each header's page indexes when it is saved — and
+    # a strategy with a locate hook reads the TOC's own page range off it,
+    # replacing the static range it was called with.
     blocks, error = load_content_list(db, document)
     if error is not None:
         return failed(error)
+
+    if strategy is not None and strategy.locate is not None:
+        located = strategy.locate(blocks)
+        if located is not None:
+            start_page, end_page = located
+            end_page = min(end_page, start_page + MAX_PAGE_SPAN)
 
     clamped = page_range(start_page, end_page, document.pages)
     if clamped is None:
@@ -211,8 +293,11 @@ def run_pages(
 
     # A range that misses the contents page parses to body text, and body text
     # sent to the model would come back as invented headings, so it is refused
-    # here.
-    if find_marker(markdown) is None:
+    # here. A strategy with its own extract is exempt: its parser refuses
+    # non-TOC text by pattern, which is stricter than a marker word — and the
+    # bpa series renders its marker as a running header that the pages-parse
+    # markdown drops, so the word is absent even on the right pages.
+    if (strategy is None or strategy.extract is None) and find_marker(markdown) is None:
         return failed(
             f"pages {start}–{end} parsed, but no contents marker was in them; "
             "check the page range",
@@ -223,14 +308,22 @@ def run_pages(
 
     began = time.monotonic()
     try:
-        extracted = extract_headers(contents_section(markdown))
+        if strategy is not None and strategy.extract is not None:
+            extracted = strategy.extract(markdown)
+        else:
+            extracted = extract_headers(contents_section(markdown), llm=llm)
     except ExtractionError as exc:
         return failed(
             str(exc), start_page=start, end_page=end, parse_seconds=parse_seconds
         )
     llm_seconds = time.monotonic() - began
 
-    saved = save_headers(db, document.id, extracted, blocks)
+    ranges = (
+        strategy.ranges(extracted, blocks)
+        if strategy is not None and strategy.ranges is not None
+        else None
+    )
+    saved = save_headers(db, document.id, extracted, blocks, ranges=ranges)
 
     return PagesResult(
         id=document.id,
@@ -240,4 +333,23 @@ def run_pages(
         end_page=end,
         parse_seconds=parse_seconds,
         llm_seconds=llm_seconds,
+    )
+
+
+def run_group(db: Session, document: Document, llm: str | None = None) -> PagesResult:
+    """The Group method: ``run_pages`` with the document's own group strategy.
+
+    The page range — and any extract/ranges hook — comes from the strategy,
+    never from the toolbar. ``llm`` is the toolbar's pick and stands only when
+    the strategy does not name one; a strategy with its own ``extract`` makes
+    no model call at all.
+    """
+    strategy = strategy_for(document.group_id)
+    return run_pages(
+        db,
+        document,
+        strategy.start_page,
+        strategy.end_page,
+        llm=strategy.llm or llm,
+        strategy=strategy,
     )

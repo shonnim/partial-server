@@ -7,8 +7,8 @@ from app.services.grouping import (
     MAX_GROUP_BATCH,
     MAX_GROUP_ID_LENGTH,
     assign_group,
-    group_ids_in_use,
     normalise_group_id,
+    suggested_group_ids,
 )
 from app.services.tree import (
     DEFAULT_FILE_PAGE,
@@ -36,7 +36,7 @@ def grouping_page(request: Request, db: Session = Depends(get_db)) -> HTMLRespon
             "failed": failed,
             "max_batch": MAX_GROUP_BATCH,
             "max_length": MAX_GROUP_ID_LENGTH,
-            "known_groups": group_ids_in_use(db),
+            "known_groups": suggested_group_ids(db),
         },
     )
 

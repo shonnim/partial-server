@@ -6,9 +6,11 @@ the nesting, and nothing else does. The model is asked for that nesting as a
 is far easier to constrain, to validate, and to argue with when it comes out
 wrong. The tree is rebuilt here, from the levels, with an explicit stack.
 
-Extraction is destructive by design: re-running it for a document replaces that
-document's headers rather than appending a second copy, because the pasted text
-is a correction of the previous attempt, not an addition to it.
+Re-running extraction corrects the previous attempt rather than appending a
+second copy: entries are matched to the stored rows in reading order, matched
+rows are updated in place — keeping their ids, and with them the section
+contents already hanging off them — extra entries are inserted, and stored rows
+with no entry left to match are deleted.
 """
 
 import enum
@@ -23,6 +25,7 @@ from typing import Any, NamedTuple
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.llm import LLMError, chat_json
 from app.models.document import Document, HasHeader
 from app.models.header import Header
@@ -42,6 +45,20 @@ MAX_LEVEL = 6
 # "the user pasted a table of contents" from "the user pasted the whole PDF".
 MAX_INPUT_CHARS = 40_000
 
+# The models the page's picker offers, in the order the box lists them — the
+# same pair the Summarizing page offers. The first is the default: the
+# self-hosted text model everything else uses.
+HEADER_LLMS: dict[str, str] = {
+    "gemma": "Gemma 4 (local)",
+    "solar": "Solar Pro 4 (Upstage)",
+}
+DEFAULT_LLM = "gemma"
+
+
+def resolve_llm(llm: str | None) -> str:
+    """The picker's value, or the default for anything it does not offer."""
+    return llm if llm in HEADER_LLMS else DEFAULT_LLM
+
 
 class ExtractionMethod(str, enum.Enum):
     """How the headers of a document are obtained.
@@ -49,11 +66,15 @@ class ExtractionMethod(str, enum.Enum):
     MANUAL is hand-fed: a person pastes the contents page. PAGES is automatic:
     the contents page is located in the content list, cut out of the PDF by the
     parsing service, and the resulting markdown takes the place of the paste.
-    Both end in the same model call.
+    GROUP is PAGES again, but each document's page range (and model, when the
+    strategy names one) comes from its group id's strategy instead of the
+    toolbar — documents of one group share a layout, so they share a contents
+    page location too. All three end in the same model call.
     """
 
     MANUAL = "manual"
     PAGES = "pages"
+    GROUP = "group"
 
     @property
     def label(self) -> str:
@@ -63,6 +84,7 @@ class ExtractionMethod(str, enum.Enum):
 _METHOD_LABELS = {
     ExtractionMethod.MANUAL: "Manual",
     ExtractionMethod.PAGES: "Pages",
+    ExtractionMethod.GROUP: "Group",
 }
 
 
@@ -125,6 +147,11 @@ two.
 
 _TITLE_NOISE = re.compile(r"[\s\W_]+", re.UNICODE)
 
+# A parenthesised aside inside a title — usually the English term beside the
+# Korean one: "공공 재정(Public Finances) 신뢰 강화". The contents page and
+# the body heading routinely disagree on whether it is there.
+_PAREN_ASIDE = re.compile(r"\([^()]*\)|（[^（）]*）")
+
 
 def _title_key(title: str) -> str:
     """A title reduced to what survives copying: letters and digits, folded.
@@ -133,6 +160,77 @@ def _title_key(title: str) -> str:
     numeral typed as a letter ("I.") reduce to the same key.
     """
     return _TITLE_NOISE.sub("", unicodedata.normalize("NFKC", title)).casefold()
+
+
+def _bare_title_key(title: str) -> str:
+    """``_title_key`` with parenthesised asides dropped first.
+
+    "공공 채무(Public Debt) 대응 전략" and "공공 채무 대응 전략" reduce to
+    the same bare key, whichever of the contents page and the body heading
+    carries the parenthesis — an aside *inserted* mid-title defeats the plain
+    startswith match, which only forgives additions at the end.
+    """
+    return _title_key(_PAREN_ASIDE.sub(" ", title))
+
+
+# ---- normalising a title before it is stored ---------------------------------
+
+# The roman-numeral characters this corpus actually uses; the other numerals
+# arrive as plain letters already.
+_ROMAN_CHARS = {"Ⅱ": "II", "Ⅲ": "III"}
+
+# What a trailing run may be made of before it counts as dot leaders: the
+# dot-like characters parsers render leaders as, plus the spaces between them.
+_DOT_CHARS = ".·․‥…"
+
+# A title opening with its ordinal — a roman numeral or a short number — and
+# the run of punctuation a design put between the ordinal and the text:
+# "I. 서론", "I -- 서론", "2、개요". The separator must contain at least one
+# character, so "Internet" cannot read as "I" + "nternet".
+_LEADING_ORDINAL = re.compile(
+    r"^(?P<num>[IVX]+|\d{1,2})"
+    r"(?P<sep>[\s.．·ㆍ:：,、\-–—―]+)"
+    r"(?P<rest>\S.*)$"
+)
+
+
+def normalize_title(title: str) -> str:
+    """One extracted title, restyled the way the corpus numbers its headings.
+
+    Three repairs, in order: the single-character roman numerals Ⅱ and Ⅲ
+    become the letters II and III; dot leaders left dangling after the text
+    ("1. 개요....") come off; and a title opening with an ordinal is forced
+    into the "I. 서론" / "2. 개요" pattern whatever design sat between the
+    ordinal and the text ("I -- 서론").
+
+    Two shapes are left alone: hierarchical numbering ("1.2 예산"), whose dot
+    is part of the ordinal rather than a separator, and a lone roman letter
+    followed by an English word ("I think"), which is a sentence, not an
+    ordinal.
+    """
+    text = title.strip()
+    for char, plain in _ROMAN_CHARS.items():
+        text = text.replace(char, plain)
+
+    # Trailing dot leaders: strip the run only when it holds an ellipsis or at
+    # least two dots — a sentence's single full stop is not a leader.
+    stripped = text.rstrip(_DOT_CHARS + " \t")
+    removed = text[len(stripped) :]
+    if "…" in removed or sum(removed.count(c) for c in _DOT_CHARS) >= 2:
+        text = stripped
+
+    match = _LEADING_ORDINAL.match(text)
+    if match is None:
+        return text
+    num, sep, rest = match.group("num", "sep", "rest")
+
+    hierarchical = (
+        num.isdigit() and sep.strip() in {".", "．"} and " " not in sep and rest[0].isdigit()
+    )
+    english_word = len(num) == 1 and not sep.strip() and rest[0].isascii() and rest[0].isalpha()
+    if hierarchical or english_word:
+        return text
+    return f"{num}. {rest}"
 
 
 @dataclass(frozen=True)
@@ -198,13 +296,14 @@ def _clean(raw: Sequence[dict[str, Any]]) -> list[ExtractedHeader]:
     trivially recoverable — but a level is only ever pulled *up* to keep the
     tree connected, never pushed deeper than the model asked for.
 
-    Body headings that echo an entry already taken are dropped on the way.
+    Body headings that echo an entry already taken are dropped on the way,
+    and every title goes through ``normalize_title`` before it is kept.
     """
     headers: list[ExtractedHeader] = []
     previous = 0
 
     for item in raw:
-        title = str(item.get("title") or "").strip()
+        title = normalize_title(str(item.get("title") or ""))
         if not title:
             continue
 
@@ -233,8 +332,14 @@ def _clean(raw: Sequence[dict[str, Any]]) -> list[ExtractedHeader]:
     return headers
 
 
-def extract_headers(contents: str) -> list[ExtractedHeader]:
-    """Ask the model to turn a pasted contents page into ordered headings."""
+def extract_headers(contents: str, llm: str | None = None) -> list[ExtractedHeader]:
+    """Ask the model to turn a pasted contents page into ordered headings.
+
+    ``llm`` is the page picker's value: the default is the configured text
+    model; "solar" sends the same call to the Upstage Solar chat endpoint,
+    which answers the same OpenAI-compatible shape and authenticates with the
+    embedding key.
+    """
     text = contents.strip()
     if not text:
         raise ExtractionError("No text was pasted.")
@@ -244,12 +349,22 @@ def extract_headers(contents: str) -> list[ExtractedHeader]:
             f"(at most {MAX_INPUT_CHARS:,})."
         )
 
+    endpoint: dict[str, str] = {}
+    if resolve_llm(llm) == "solar":
+        settings = get_settings()
+        endpoint = {
+            "base_url": settings.solar_base_url,
+            "api_key": settings.upstage_api_key,
+            "model": settings.solar_model,
+        }
+
     try:
         reply = chat_json(
             system=SYSTEM_PROMPT,
             user=build_user_prompt(text),
             schema=HEADER_SCHEMA,
             schema_name="headers",
+            **endpoint,
         )
     except LLMError as exc:
         raise ExtractionError(str(exc)) from exc
@@ -289,32 +404,46 @@ def _page_of(block: Any) -> int | None:
 
 
 def locate_heading(
-    blocks: Sequence[Any], key: str, after_page: int | None
+    blocks: Sequence[Any], title: str, after_page: int | None, *, after_index: int = -1
 ) -> LocatedHeading | None:
-    """The body block that is the heading for ``key``, or None.
+    """The body block that is the heading for ``title``, or None.
 
-    ``key`` is a ``_title_key``. A text block matches when its own key starts
-    with it — body headings often append what the contents list left out, like
-    the English title in brackets. Blocks up to and including ``after_page``
-    are skipped: that is where the contents page lists the same title, and
-    the listing is not the heading.
+    A text block matches when its ``_title_key`` starts with the title's —
+    body headings often append what the contents list left out, like the
+    English title in brackets — or, failing that, when the two *bare* keys
+    match the same way: an aside inserted mid-title ("공공 채무(Public Debt)
+    대응 전략" against the list's "공공 채무 대응 전략") breaks the plain
+    prefix, whichever side carries it. Blocks up to and including
+    ``after_page`` are skipped: that is where the contents page lists the
+    same title, and the listing is not the heading. Blocks at or before
+    ``after_index`` are skipped too — a caller walking headers in reading
+    order passes the previous heading's index, so a title repeated across
+    chapters resolves to its own occurrence rather than the first.
 
     A block carrying ``text_level`` is what the parser called a heading and is
     preferred. When no matching block carries it, the first matching body
     block is taken instead — a heading the parser rendered as plain text.
     """
+    key = _title_key(title)
     if not key:
         return None
+    bare = _bare_title_key(title)
 
     fallback: LocatedHeading | None = None
     for index, block in enumerate(blocks):
+        if index <= after_index:
+            continue
         if not isinstance(block, dict) or block.get("type") != "text":
             continue
         page = _page_of(block)
         if page is None or (after_page is not None and page <= after_page):
             continue
         text = block.get("text")
-        if not isinstance(text, str) or not _title_key(text).startswith(key):
+        if not isinstance(text, str):
+            continue
+        if not _title_key(text).startswith(key) and not (
+            bare and _bare_title_key(text).startswith(bare)
+        ):
             continue
         if "text_level" in block:
             return LocatedHeading(index=index, page=page)
@@ -373,7 +502,7 @@ def page_index_ranges(
     printed = page_number_index(blocks)
     last = last_page_index(blocks)
 
-    located = [locate_heading(blocks, _title_key(h.title), contents) for h in headers]
+    located = [locate_heading(blocks, h.title, contents) for h in headers]
 
     starts: list[int | None] = []
     for entry, heading in zip(headers, located, strict=True):
@@ -415,41 +544,73 @@ def save_headers(
     doc_id: uuid.UUID,
     headers: Sequence[ExtractedHeader],
     blocks: Any = None,
+    *,
+    ranges: Sequence[tuple[int | None, int | None]] | None = None,
 ) -> int:
-    """Replace a document's headers with ``headers``, nesting them by level.
+    """Write ``headers`` as the document's outline, nesting them by level.
 
-    Returns how many rows were written. The parent of an entry is the closest
-    preceding entry at a shallower level, which is what the level stack tracks.
+    Returns how many rows the document now has. The parent of an entry is the
+    closest preceding entry at a shallower level, which is what the level stack
+    tracks.
+
+    Stored rows are not thrown away wholesale: entries are matched to them in
+    reading order (rows come back in id order, which is reading order), each
+    matched row is updated in place so its id — and the section contents keyed
+    on it — survives the redo, entries past the stored rows are inserted, and
+    stored rows past the entries are deleted, taking their contents with them.
 
     ``blocks`` is the document's content list, used to fill ``start_page_idx``
-    and ``end_page_idx``; without it both stay NULL.
+    and ``end_page_idx``; without it both stay NULL. A group strategy that
+    computed the indexes its own way passes them as ``ranges``, one pair per
+    entry, and the content-list matching is skipped.
     """
-    db.execute(delete(Header).where(Header.doc_id == doc_id))
+    existing = db.scalars(
+        select(Header).where(Header.doc_id == doc_id).order_by(Header.id)
+    ).all()
 
-    ranges = page_index_ranges(headers, blocks)
+    if ranges is None:
+        ranges = page_index_ranges(headers, blocks)
 
     # stack[i] holds the id of the most recent header at level i + 1.
     stack: list[int] = []
 
-    for entry, (start_idx, end_idx) in zip(headers, ranges, strict=True):
+    for position, (entry, (start_idx, end_idx)) in enumerate(
+        zip(headers, ranges, strict=True)
+    ):
         parent_id = stack[entry.level - 2] if entry.level > 1 else None
 
-        row = Header(
-            doc_id=doc_id,
-            header=entry.title,
-            parent_id=parent_id,
-            level=entry.level,
-            start_page=entry.start_page,
-            start_page_idx=start_idx,
-            end_page_idx=end_idx,
-        )
-        db.add(row)
-        # The id is needed as the parent of whatever comes next, so each row is
-        # flushed as it is added rather than in one batch at the end.
-        db.flush()
+        if position < len(existing):
+            row = existing[position]
+            row.header = entry.title
+            row.parent_id = parent_id
+            row.level = entry.level
+            row.start_page = entry.start_page
+            row.start_page_idx = start_idx
+            row.end_page_idx = end_idx
+        else:
+            row = Header(
+                doc_id=doc_id,
+                header=entry.title,
+                parent_id=parent_id,
+                level=entry.level,
+                start_page=entry.start_page,
+                start_page_idx=start_idx,
+                end_page_idx=end_idx,
+            )
+            db.add(row)
+            # The id is needed as the parent of whatever comes next, so each
+            # row is flushed as it is added rather than in one batch at the end.
+            db.flush()
 
         del stack[entry.level - 1 :]
         stack.append(row.id)
+
+    # A stored row can only parent rows behind it in reading order, so the
+    # leftover tail never parents a row that was kept; the cascade takes the
+    # tail's own descendants and contents with it.
+    leftover = [row.id for row in existing[len(headers) :]]
+    if leftover:
+        db.execute(delete(Header).where(Header.id.in_(leftover)))
 
     db.commit()
     return len(headers)
@@ -607,6 +768,9 @@ class Candidate:
     id: uuid.UUID
     filename: str
     header_count: int
+    #: The Grouping page's label, which is what picks the strategy under the
+    #: Group method; None for a document never grouped.
+    group_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -616,6 +780,11 @@ class GateReport:
     method: ExtractionMethod
     eligible: list[Candidate]
     skipped: list[Candidate]
+    #: Documents left alone because their headers are already stored and the
+    #: Force toggle was off. A folder path can resolve to them even though
+    #: their rows on the page are disabled — rows still behind "load more"
+    #: have no box to disable — so the gate has to hold them back itself.
+    stored: list[Candidate]
     #: (filename, reason) for documents whose has_header could not be settled.
     failed: list[tuple[str, str]]
     #: How many were UNCHECKED when the button was pressed and got a verdict.
@@ -625,13 +794,19 @@ class GateReport:
 
 
 def prepare_for_extraction(
-    db: Session, doc_ids: Sequence[uuid.UUID], method: ExtractionMethod
+    db: Session,
+    doc_ids: Sequence[uuid.UUID],
+    method: ExtractionMethod,
+    *,
+    force: bool = False,
 ) -> GateReport:
     """Resolve has_header for the selection, then split it by verdict.
 
     An UNCHECKED document is checked first — that is the whole point of running
     this before extraction. NO is skipped. A document whose check could not be
-    run is reported as failed rather than quietly treated as either.
+    run is reported as failed rather than quietly treated as either. A document
+    whose headers are already stored is held back too — re-doing one is a
+    deliberate act — unless ``force`` says that is exactly what is meant.
     """
     report = check_has_header(db, doc_ids)
 
@@ -646,19 +821,26 @@ def prepare_for_extraction(
 
     eligible: list[Candidate] = []
     skipped: list[Candidate] = []
+    stored: list[Candidate] = []
     for document in documents:
         candidate = Candidate(
             id=document.id,
             filename=document.filename,
             header_count=header_count(db, document.id),
+            group_id=document.group_id,
         )
-        target = eligible if document.has_header is HasHeader.YES else skipped
-        target.append(candidate)
+        if document.has_header is not HasHeader.YES:
+            skipped.append(candidate)
+        elif candidate.header_count and not force:
+            stored.append(candidate)
+        else:
+            eligible.append(candidate)
 
     return GateReport(
         method=method,
         eligible=eligible,
         skipped=skipped,
+        stored=stored,
         failed=failed,
         checked_now=report.decided,
         updates=report.updates,

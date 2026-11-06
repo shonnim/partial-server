@@ -164,8 +164,13 @@
   // storing headers for a document disables its box, which changes the counts
   // and may leave its folder with nothing to select. Pass the changed node so
   // its ancestors are re-derived first.
+  // For a folder node the node itself is re-derived too: the Headers tree's
+  // Force toggle changes ticks *inside* a folder without a change event.
   window.refreshTreeCounts = (changed) => {
-    if (changed) refreshAncestors(changed);
+    if (changed) {
+      refresh(changed);
+      refreshAncestors(changed);
+    }
     updateCounts();
   };
 

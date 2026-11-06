@@ -7,10 +7,11 @@
   outline for a document that has none would be inventing structure.
 
   A document that already has headers stored is out of the selection: its box is
-  disabled and its count is on the row. Extraction replaces a document's headers
-  rather than adding to them, so sweeping a stored document into a batch is
+  disabled and its count is on the row. Extraction rewrites a document's headers
+  rather than adding a second copy, so sweeping a stored document into a batch is
   never what someone meant — re-doing one is a deliberate act, done through its
-  own Manual button.
+  own Manual button or by ticking the Force get header toggle, which hands these
+  boxes back (headers.js owns that).
 #}
 {% for file in level.files %}
   <li class="tree-node is-file" data-id="{{ file.id }}">
@@ -18,13 +19,16 @@
       <input type="checkbox" class="tree-check" data-kind="file"
              value="{{ file.id }}" aria-label="Select {{ file.filename }}"
              {% if file.header_count %}disabled
-             title="{{ file.header_count }} header{{ '' if file.header_count == 1 else 's' }} already stored — use Manual to redo them"{% endif %}>
+             title="{{ file.header_count }} header{{ '' if file.header_count == 1 else 's' }} already stored — tick Force get header or use Manual to redo them"{% endif %}>
       <span class="tree-icon">📄</span>
       <span class="tree-name" title="{{ file.filename }}">{{ file.filename }}</span>
       <span class="tree-badges">
         {#- Rendered on one line: an UNCHECKED document must leave the span
             genuinely empty so `.has-header:empty` can collapse it. -#}
-        <span class="has-header" data-value="{{ file.has_header.value }}">{% if file.has_header.value == 'YES' %}<span class="pill ok">✓ yes header</span>{% elif file.has_header.value == 'NO' %}<span class="pill total">— no header</span>{% endif %}</span>
+        <span class="has-header" data-value="{{ file.has_header.value }}">{% if file.has_header.value == 'YES' %}<span class="pill ok" title="has a contents page">✓</span>{% elif file.has_header.value == 'NO' %}<span class="pill total">— no header</span>{% endif %}</span>
+        {#- The Grouping page's label: under the Group method it is what picks
+            the document's extraction strategy, so the row says which one. -#}
+        <span class="group-cell">{% if file.group_id %}<span class="pill group" title="group id">🏷 {{ file.group_id }}</span>{% endif %}</span>
         {#- Same one-line rule as the verdict above: empty means "none stored",
             and `.header-count:empty` collapses it. -#}
         <span class="header-count" data-count="{{ file.header_count }}">{% if file.header_count %}<span class="pill headers">{{ file.header_count }} header{{ '' if file.header_count == 1 else 's' }}</span>{% endif %}</span>
@@ -44,6 +48,13 @@
            data-viewer data-outline
            title="{{ file.header_count }} header{{ '' if file.header_count == 1 else 's' }} stored"
            href="{{ url_for('header_outline', document_id=file.id) }}">Headers</a>
+
+        {#- The bucket-TOC pop-up. Live for every row: the metadata JSON can
+            exist (or not) regardless of what this server knows, and the
+            pop-up itself says exactly what is missing. -#}
+        <a class="btn tree-view btn-transfer" data-viewer
+           title="compare the RAG bucket's TOC with the stored headers"
+           href="{{ url_for('header_transfer_form', document_id=file.id) }}">Transfer</a>
 
         <a class="btn tree-view btn-pdf" data-viewer
            href="{{ url_for('document_viewer', document_id=file.id) }}">PDF</a>

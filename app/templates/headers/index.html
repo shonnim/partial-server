@@ -9,7 +9,10 @@
 {% endblock %}
 
 {% block content %}
-  <div class="parsing-layout">
+  {#- headers-layout: this page's rows carry the most badges and buttons, so
+      the side box gives up some width to the tree and the tree text steps
+      down a size (see the headers-page block in app.css). -#}
+  <div class="parsing-layout headers-layout">
     <div class="parsing-main">
       <div class="card tree-card">
         <div class="tree-head">
@@ -45,6 +48,17 @@
             {% endfor %}
           </select>
         </label>
+        {#- The model extraction talks to — read by both methods: the Pages
+            queue pins the pick onto its card, and the Manual pop-up reads the
+            box at submit time. Same pair as the Summarizing page. -#}
+        <label class="method-picker side-method" for="header-llm">
+          <span class="method-label">llm</span>
+          <select id="header-llm" name="llm">
+            {% for key, label in llms.items() %}
+              <option value="{{ key }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
         {#- Only the Pages method reads these: the page range to parse, 1-based
             as a PDF viewer counts, inclusive. The parser gets each one lower as
             its 0-based start_page_id and end_page_id. The same range is used
@@ -61,6 +75,17 @@
                  title="Last PDF page to parse, inclusive, at most {{ max_page_span }} past the start (sent as end_page_id = page − 1)">
         </div>
 
+        {#- Force: hands the rows whose headers are already stored back to the
+            selection. The tree disables those boxes so a batch cannot sweep up
+            a finished document by accident; ticking this re-enables them (and
+            the folders above them), and the gate lets them through to be
+            re-extracted. headers.js owns the toggling and the restore. -#}
+        <label class="method-picker side-method force-picker" for="force-get-header"
+               title="Include documents whose headers are already stored — re-extraction updates their rows and inserts any new ones">
+          <input type="checkbox" id="force-get-header">
+          <span>force get header</span>
+        </label>
+
         <div class="side-box-actions">
           <button type="button" class="btn btn-md" id="btn-has-header"
                   hx-post="{{ url_for('headers_check') }}"
@@ -76,7 +101,7 @@
           <button type="button" class="btn btn-manual" id="btn-get-header" disabled
                   title="Pick a method other than Manual"
                   hx-post="{{ url_for('headers_get') }}"
-                  hx-vals="js:{selection: window.treeSelectionJSON(), method: window.headerMethod(), ...window.headerPageRange()}"
+                  hx-vals="js:{selection: window.treeSelectionJSON(), method: window.headerMethod(), force: window.headerForce(), llm: window.headerLLM(), ...window.headerPageRange()}"
                   hx-target="#header-result"
                   hx-swap="innerHTML"
                   hx-indicator="#header-spinner">
