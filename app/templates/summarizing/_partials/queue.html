@@ -10,6 +10,7 @@
 {% if error %}
   <div class="card check-result is-error">{{ error }}</div>
 {% else %}
+  {%- set alerts = queue.skipped | selectattr("alert") | list -%}
   <div class="card check-result" data-run="summarizing"
        data-force="{{ '1' if force else '' }}" data-general="{{ '1' if general else '' }}"
        data-llm="{{ llm or '' }}">
@@ -30,6 +31,14 @@
         <span class="check-note">Nothing in this selection can be summarized.</span>
       {% endif %}
     </div>
+
+    {% if alerts %}
+      <div class="queue-alert" role="alert">
+        ⚠ {{ alerts|length }} file{{ '' if alerts|length == 1 else 's' }} not summarized:
+        a header with no content. Run Section on {{ 'it' if alerts|length == 1 else 'them' }}
+        first — the empty headers are named below.
+      </div>
+    {% endif %}
 
     {% if queue.eligible %}
       <ul class="chunk-report">
@@ -53,7 +62,7 @@
           <li class="chunk-report-row">
             <div class="chunk-report-head">
               <span class="chunk-report-name" title="{{ candidate.filename }}">{{ candidate.filename }}</span>
-              <span class="chunk-report-reason">↷ {{ candidate.reason }}</span>
+              <span class="chunk-report-reason{{ ' is-alert' if candidate.alert }}">{{ '⚠' if candidate.alert else '↷' }} {{ candidate.reason }}</span>
             </div>
           </li>
         {% endfor %}

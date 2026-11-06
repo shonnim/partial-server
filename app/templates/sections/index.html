@@ -37,13 +37,22 @@
           <span class="spinner" id="section-spinner"></span>
         </div>
 
+        {#- Force takes already-sectioned documents back into the selection:
+            sections.js re-enables their boxes while it is ticked, and the
+            queue keeps them. A forced run removes the document's chunks and
+            replaces its blocks. -#}
+        <label class="group-label embed-force" for="section-force"
+               title="let documents with stored blocks be ticked and sectioned again — their chunks are removed and their blocks replaced">
+          <input type="checkbox" id="section-force" value="1"> force re-section
+        </label>
+
         <div class="side-box-actions">
           {#- Disabled and spinning for as long as the queue it starts is
               live; sections.js owns that state. -#}
           <button type="button" class="btn btn-primary btn-section" id="btn-section"
                   data-label="📑 Section"
                   hx-post="{{ url_for('sections_run') }}"
-                  hx-vals="js:{selection: window.treeSelectionJSON()}"
+                  hx-vals="js:{selection: window.treeSelectionJSON(), ...(document.getElementById('section-force')?.checked ? {force: '1'} : {})}"
                   hx-target="#section-result"
                   hx-swap="innerHTML"
                   hx-indicator="#section-spinner">
@@ -53,7 +62,10 @@
 
         <p class="side-note">
           One document at a time · charts and images go through the model ·
-          already sectioned are skipped · at most
+          already sectioned are skipped unless <strong>force re-section</strong>
+          is on — a forced run removes the document's stored chunks and
+          replaces its blocks, reusing the figure descriptions already stored
+          instead of calling the model again · at most
           <strong>{{ max_batch }}</strong> per click.
         </p>
       </section>

@@ -254,6 +254,55 @@ def test_strict_doc_summary_refuses_the_level2_fallback() -> None:
     assert doc.summary is None
 
 
+# ---- the pre-run content check ------------------------------------------------------
+
+
+def test_empty_check_names_the_headers_without_content() -> None:
+    # Two sections under a chapter; only the first has content rows. The run
+    # could only fail on the second, so the check names it — and only it: the
+    # chapter is summarised from its children's conclusions, never checked.
+    l1 = Header(id=1, header="I. 공공 재정", level=1)
+    s1 = Header(id=2, header="1. 서론", level=2, parent_id=1)
+    s2 = Header(id=3, header="2. 대응 전략", level=2, parent_id=1)
+    children = {None: [l1], 1: [s1, s2]}
+
+    missing = summarizing._empty_summary_headers([l1, s1, s2], children, {2})
+
+    assert missing == ["2. 대응 전략"]
+
+
+def test_empty_check_reads_content_through_descendants() -> None:
+    # The level-2 header's rows all sit under its level-3 child, the way
+    # subtree_blocks reads them: the subtree has content, nothing is flagged.
+    s2 = Header(id=2, header="1. 서론", level=2, parent_id=1)
+    s3 = Header(id=3, header="가. 배경", level=3, parent_id=2)
+    children = {2: [s3]}
+
+    assert summarizing._empty_summary_headers([s2, s3], children, {3}) == []
+
+
+def test_empty_check_flags_a_childless_level1_without_content() -> None:
+    # A level-1 header without level-2 children is summarised from its own
+    # rows, so it is checked like a section; with children it is not.
+    alone = Header(id=1, header="부록", level=1)
+    parent = Header(id=2, header="I. 본문", level=1)
+    child = Header(id=3, header="1. 장", level=2, parent_id=2)
+    children = {2: [child]}
+
+    missing = summarizing._empty_summary_headers([alone, parent, child], children, {3})
+
+    assert missing == ["부록"]
+
+
+def test_empty_headers_reason_names_at_most_three() -> None:
+    assert summarizing._empty_headers_reason(["1. 서론"]) == (
+        "header has no content: '1. 서론' — run Section first"
+    )
+    assert summarizing._empty_headers_reason(["가", "나", "다", "라", "마"]) == (
+        "5 headers have no content: '가', '나', '다' and 2 more — run Section first"
+    )
+
+
 # ---- building the text ------------------------------------------------------------
 
 

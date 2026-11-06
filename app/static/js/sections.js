@@ -42,6 +42,48 @@
     }
   }
 
+  // ---- force re-section ----------------------------------------------------------
+
+  // The tree disables a row's box once blocks are stored. The "force
+  // re-section" box lifts that: every disabled box is released — and marked,
+  // so turning the force off puts exactly those back. Rows that arrive later
+  // (a folder expanded, "load more") come from the server disabled and are
+  // released on arrival; refreshRow leaves a just-run row tickable too.
+  const forceBox = document.getElementById("section-force");
+  const forceOn = () => Boolean(forceBox && forceBox.checked);
+
+  function releaseBoxes() {
+    const root = document.getElementById("tree-root");
+    if (!root) return;
+    const released = Array.from(root.querySelectorAll(".tree-check:disabled"));
+    for (const box of released) {
+      box.disabled = false;
+      box.dataset.forceReleased = "1";
+    }
+    // Folder boxes derive their state from their children, so each released
+    // row hands its ancestors back as well.
+    for (const box of released) {
+      if (window.refreshTreeCounts) window.refreshTreeCounts(box.closest(".tree-node"));
+    }
+  }
+
+  function restoreBoxes() {
+    document
+      .querySelectorAll("#tree-root .tree-check[data-force-released]")
+      .forEach((box) => {
+        delete box.dataset.forceReleased;
+        box.checked = false;
+        box.indeterminate = false;
+        box.disabled = true;
+        if (window.refreshTreeCounts) window.refreshTreeCounts(box.closest(".tree-node"));
+      });
+  }
+
+  forceBox?.addEventListener("change", () => {
+    if (forceBox.checked) releaseBoxes();
+    else restoreBoxes();
+  });
+
   // ---- repainting the tree -----------------------------------------------------
 
   /** Keep a row honest after a run stored its blocks: count and tick.
@@ -69,13 +111,14 @@
     }
 
     const box = row.querySelector(":scope > .tree-row > .tree-check");
-    if (box) {
-      box.disabled = count > 0;
-      box.title = count ? `${plural(count, "block")} already stored` : "";
-      if (box.disabled) {
-        box.checked = false;
-        box.indeterminate = false;
-      }
+    if (box && count > 0) {
+      // Done, so out of the selection either way — but with the force on the
+      // box stays usable (and marked, so turning the force off locks it).
+      box.checked = false;
+      box.indeterminate = false;
+      box.title = `${plural(count, "block")} already stored`;
+      box.disabled = !forceOn();
+      if (!box.disabled) box.dataset.forceReleased = "1";
     }
     if (window.refreshTreeCounts) window.refreshTreeCounts(row);
   }
@@ -346,6 +389,12 @@
   });
 
   document.body.addEventListener("htmx:afterSwap", (event) => {
+    // Rows loaded after the force was ticked — a folder expanded, "load
+    // more" — arrive disabled from the server; release them like the rest.
+    // tree.js has already run its own afterSwap work by now (it registered
+    // first), so the re-derive inside releaseBoxes has the final word.
+    if (forceOn()) releaseBoxes();
+
     const target = event.detail.target;
     if (target.id !== "section-result") return;
     const card = target.querySelector('[data-run="sections"]');

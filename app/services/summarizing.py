@@ -623,12 +623,94 @@ class QueueCandidate:
 class QueueSkip:
     filename: str
     reason: str
+    # True for a skip the page must raise an alert for, not just list: a
+    # document with a header the run could only fail on.
+    alert: bool = False
 
 
 @dataclass(frozen=True)
 class SummarizeQueue:
     eligible: list[QueueCandidate]
     skipped: list[QueueSkip]
+
+
+def _empty_summary_headers(
+    headers: Sequence[Header],
+    children: dict[int | None, list[Header]],
+    with_content: set[int],
+) -> list[str]:
+    """Titles of the level 1-2 headers the Summarize run would read content
+    for, but whose subtree holds no non-empty content row.
+
+    Each one is a guaranteed "no content rows under this header" failure, so
+    ``build_queue`` alerts on the document instead of queueing it. A level-1
+    header with level-2 children is summarised from their conclusions, not
+    from content, so only the children are checked; ``with_content`` is the
+    set of header ids that carry at least one non-empty content row.
+    """
+
+    def has_content(header: Header) -> bool:
+        return header.id in with_content or any(
+            has_content(child) for child in children.get(header.id, [])
+        )
+
+    return [
+        h.header.strip()
+        for h in headers
+        if h.level in SUMMARY_LEVELS
+        and not (h.level == 1 and any(c.level == 2 for c in children.get(h.id, [])))
+        and not has_content(h)
+    ]
+
+
+def headers_missing_content(
+    db: Session, doc_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, list[str]]:
+    """Per document, the headers a Summarize run could only fail on.
+
+    Only header rows and a set of header ids are read — never the content
+    rows themselves, which over a whole selection would be the documents'
+    full text.
+    """
+    if not doc_ids:
+        return {}
+    with_content: set[int] = set(
+        db.scalars(
+            text("""
+                SELECT DISTINCT header_id FROM header_contents
+                WHERE doc_id = ANY(cast(:ids AS uuid[])) AND header_id IS NOT NULL
+                  AND (btrim(coalesce(content, '')) <> ''
+                       OR btrim(coalesce(caption, '')) <> ''
+                       OR btrim(coalesce(footnote, '')) <> '')
+            """),
+            {"ids": [str(i) for i in doc_ids]},
+        ).all()
+    )
+
+    by_doc: dict[uuid.UUID, list[Header]] = {}
+    for header in db.scalars(
+        select(Header).where(Header.doc_id.in_(doc_ids)).order_by(Header.id)
+    ).all():
+        by_doc.setdefault(header.doc_id, []).append(header)
+
+    missing: dict[uuid.UUID, list[str]] = {}
+    for doc_id, headers in by_doc.items():
+        children: dict[int | None, list[Header]] = {}
+        for header in headers:
+            children.setdefault(header.parent_id, []).append(header)
+        titles = _empty_summary_headers(headers, children, with_content)
+        if titles:
+            missing[doc_id] = titles
+    return missing
+
+
+def _empty_headers_reason(titles: Sequence[str]) -> str:
+    """The skip reason naming the empty headers, the first three by title."""
+    named = ", ".join(f"'{t}'" for t in titles[:3])
+    if len(titles) > 3:
+        named += f" and {len(titles) - 3} more"
+    opening = "header has" if len(titles) == 1 else f"{len(titles)} headers have"
+    return f"{opening} no content: {named} — run Section first"
 
 
 def build_queue(
@@ -639,9 +721,12 @@ def build_queue(
     Only a document with level 1-2 headers and content rows can be
     summarised, and one whose summaries are all written has nothing left to
     do unless the run is forced; both are reported with the reason rather
-    than failing the click.
+    than failing the click. A document one of whose headers has no content
+    to summarise from is not queued either — the run could only fail on it —
+    and its skip is flagged as an alert naming the empty headers.
     """
     stats = file_stats(db, doc_ids)
+    missing = headers_missing_content(db, doc_ids)
     eligible: list[QueueCandidate] = []
     skipped: list[QueueSkip] = []
     for doc_id in doc_ids:
@@ -658,6 +743,11 @@ def build_queue(
         if not doc_stats.with_contents:
             skipped.append(
                 QueueSkip(doc.filename, "no content rows stored (run Section first)")
+            )
+            continue
+        if doc.id in missing:
+            skipped.append(
+                QueueSkip(doc.filename, _empty_headers_reason(missing[doc.id]), alert=True)
             )
             continue
         if doc_stats.is_done and not force:

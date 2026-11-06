@@ -68,9 +68,14 @@ def sections_nodes(
 def sections_run(
     request: Request,
     selection: str = Form(""),
+    force: bool = Form(False),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     """Turn the selection into a queue the browser walks one document at a time.
+
+    ``force`` is the page's "force re-section" box: already-sectioned
+    documents stay in the queue, and the run replaces their rows after
+    removing their chunks.
 
     Errors come back as a rendered fragment rather than an HTTP error: the
     caller is a button on the page, and a 4xx would leave the panel blank.
@@ -84,7 +89,7 @@ def sections_run(
     return templates.TemplateResponse(
         request,
         "sections/_partials/queue.html",
-        {"queue": build_queue(db, doc_ids)},
+        {"queue": build_queue(db, doc_ids, force=force), "force": force},
     )
 
 

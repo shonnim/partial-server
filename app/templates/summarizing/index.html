@@ -83,7 +83,9 @@
           Level-2 headers are summarized from their content blocks, level-1
           headers from their children's summaries, then the document's general
           summary from those · a header with a conclusion is skipped unless
-          forced · <strong>General Summarize</strong> writes only the general
+          forced · a file one of whose headers has no content is alerted and
+          not summarized — run Section on it first ·
+          <strong>General Summarize</strong> writes only the general
           summary of files whose header summaries are already stored · one
           document per request, each summary a model call · at most
           <strong>{{ "{:,}".format(max_batch) }}</strong> per click.

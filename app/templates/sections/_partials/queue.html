@@ -19,6 +19,9 @@
   <div class="card check-result" data-run="sections">
     <div class="run-strip" data-run-strip>
       <span class="pill ok">✓ {{ queue.eligible|length }} to section</span>
+      {% if force %}
+        <span class="pill fail" title="already-sectioned documents are redone: chunks removed, blocks replaced">force</span>
+      {% endif %}
       {% if queue.skipped %}
         <span class="pill total" title="already sectioned, or no headers stored — see the run log">↷ {{ queue.skipped|length }} skipped</span>
       {% endif %}

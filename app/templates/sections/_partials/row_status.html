@@ -16,8 +16,10 @@
   {%- if result.tables_without_body %}{% set _ = parts.append(result.tables_without_body ~ ' without body') %}{% endif -%}
   {%- if result.images %}{% set _ = parts.append(result.images ~ ' image' ~ ('' if result.images == 1 else 's')) %}{% endif -%}
   {%- if result.charts %}{% set _ = parts.append(result.charts ~ ' chart' ~ ('' if result.charts == 1 else 's')) %}{% endif -%}
+  {%- if result.figures_reused %}{% set _ = parts.append(result.figures_reused ~ ' reused') %}{% endif -%}
   {%- if result.unassigned %}{% set _ = parts.append(result.unassigned ~ ' before first header') %}{% endif -%}
   {%- if result.skipped_total %}{% set _ = parts.append(result.skipped_total ~ ' skipped') %}{% endif -%}
+  {%- if result.chunks_removed %}{% set _ = parts.append(result.chunks_removed ~ ' stale chunk' ~ ('' if result.chunks_removed == 1 else 's') ~ ' removed') %}{% endif -%}
   <span class="pill ok" data-doc-id="{{ result.id }}" data-content-count="{{ result.saved }}"
         data-summary="{{ parts|join(' · ') }}"
         data-seconds="{{ '%.1f'|format(result.seconds or 0) }}"
@@ -39,8 +41,14 @@
   {% if result.images %}
     <span class="pill total" title="images described by the vision model">{{ result.images }} image{{ '' if result.images == 1 else 's' }}</span>
   {% endif %}
+  {% if result.figures_reused %}
+    <span class="pill total" title="figures whose stored description was kept — same page, box, caption and footnote as before, so the vision model was not called again">♻ {{ result.figures_reused }} reused</span>
+  {% endif %}
   {% if result.skipped_total %}
     <span class="pill total" title="{% for reason, n in result.skipped.items() %}{{ reason }}: {{ n }}{{ ' · ' if not loop.last }}{% endfor %}">↷ {{ result.skipped_total }} skipped</span>
+  {% endif %}
+  {% if result.chunks_removed %}
+    <span class="pill total" title="chunks of an earlier Chunking run, removed because the rows they were cut from were replaced — re-run Chunking">{{ result.chunks_removed }} stale chunk{{ '' if result.chunks_removed == 1 else 's' }} removed</span>
   {% endif %}
   {% if result.seconds is not none %}
     <span class="pill total" title="total · model">{{ '%.0f'|format(result.seconds) }}s · {{ '%.0f'|format(result.llm_seconds) }}s</span>

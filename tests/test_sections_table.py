@@ -91,3 +91,73 @@ def test_chart_block_goes_through_the_vision_model(monkeypatch) -> None:
     assert row.footnote == "주: 한국은행 추정치.\n출처: 한국은행."
     assert tally.charts == 1
     assert tally.images == 0
+
+
+FIGURE = {
+    "type": "image",
+    "img_path": "images/def.jpg",
+    "image_caption": ["[그림 2] 채무 비율"],
+    "image_footnote": ["출처: IMF."],
+    "bbox": [100, 200, 500, 600],
+    "page_idx": 5,
+}
+
+
+def _stored_key() -> tuple:
+    # The identity of FIGURE as the previous run stored it.
+    from app.services.sections import _figure_key
+
+    return _figure_key("image", 5, (100, 200, 500, 600), "[그림 2] 채무 비율", "출처: IMF.")
+
+
+def test_a_figure_already_described_is_reused_without_a_model_call(monkeypatch) -> None:
+    """The re-section path: the previous rows hold this figure's description
+    (same type, page, box, caption and footnote), so it is kept as it stands
+    and the vision model is never called."""
+    from app.services import sections
+
+    def never(db, document, block):  # pragma: no cover - the point is it is not reached
+        raise AssertionError("the model must not be called for a reused figure")
+
+    monkeypatch.setattr(sections, "describe_figure_block", never)
+
+    tally = _Tally()
+    reuse = {_stored_key(): "이전 실행이 저장한 그림 요약."}
+    row = _row_for(None, None, FIGURE, tally, reuse)
+
+    assert row is not None
+    assert row.content == "이전 실행이 저장한 그림 요약."
+    assert row.caption == "[그림 2] 채무 비율"
+    assert row.footnote == "출처: IMF."
+    assert tally.images == 1
+    assert tally.figures_reused == 1
+    assert tally.llm_seconds == 0.0
+
+
+def test_a_changed_figure_goes_back_to_the_model(monkeypatch) -> None:
+    """A figure the previous rows do not cover — here its caption changed, so
+    its identity did — is summarised anew rather than given a stale text."""
+    from app.services import sections
+    from app.services.image_description import DescribedFigure
+
+    calls: list[dict] = []
+
+    def fake_describe(db, document, block):
+        calls.append(block)
+        return DescribedFigure(
+            text="새로 쓴 요약.", caption="[그림 2] 채무 비율 (수정)", footnote="출처: IMF.",
+            image_name="def.jpg",
+        )
+
+    monkeypatch.setattr(sections, "describe_figure_block", fake_describe)
+
+    tally = _Tally()
+    changed = {**FIGURE, "image_caption": ["[그림 2] 채무 비율 (수정)"]}
+    reuse = {_stored_key(): "이전 실행이 저장한 그림 요약."}
+    row = _row_for(None, None, changed, tally, reuse)
+
+    assert calls == [changed]
+    assert row is not None
+    assert row.content == "새로 쓴 요약."
+    assert tally.figures_reused == 0
+    assert tally.images == 1

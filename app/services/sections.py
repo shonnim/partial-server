@@ -9,11 +9,16 @@ the header the block sits under.
 
 Which header a block sits under is decided by position, not by page alone.
 Each header's *start* is the block that is its heading, located in the list
-by title on the page ``start_page_idx`` names; a heading that cannot be
-found on that page falls back to the first block of the page. A block belongs
-to the most recent header whose start is at or before it. Blocks before the
-first header's start — the cover, the contents page — belong to the document
-and to no header, and are stored with ``header_id`` NULL.
+by title — sequentially, each heading only after the one before it, so a
+title repeated across chapters resolves to its own occurrence. A located
+heading on the page ``start_page_idx`` names is trusted outright; when the
+two disagree, the first block of the recorded page stands in, unless the
+located heading sits before that block — trusting the page there would file
+the heading's own text under the header before it, which is how a level-2
+title ends up stored as its level-1 parent's text. A block belongs to the
+most recent header whose start is at or before it. Blocks before the first
+header's start — the cover, the contents page — belong to the document and
+to no header, and are stored with ``header_id`` NULL.
 
 A row holds the block's body in ``content``, and — for the block types the
 parser prints one beside — the ``caption`` and the ``footnote`` that stood
@@ -41,7 +46,11 @@ What is stored, by block type:
   Korean by the vision model (see ``image_description``), which is shown the
   caption, the footnote and the parser's own reading of the figure; the
   summary is the content, with ``chart_caption`` / ``chart_footnote`` or
-  ``image_caption`` / ``image_footnote`` in their own columns.
+  ``image_caption`` / ``image_footnote`` in their own columns. On a
+  re-section, a figure whose identity has not changed — same type, page,
+  bounding box, caption and footnote — keeps the description the previous
+  run stored instead of going back to the model; only a figure the previous
+  rows do not cover is summarised anew.
 * anything else with a text — stored under its own type.
 
 A document is written all at once or not at all. Every figure is summarised
@@ -61,14 +70,16 @@ from typing import Any
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from app.models.chunk import Chunk
 from app.models.document import Document
 from app.models.header import Header, HeaderContent
-from app.services.header_extraction import _title_key, header_count, locate_heading
+from app.services.header_extraction import header_count, locate_heading
 from app.services.headers import contents_page_index, load_content_list
 from app.services.image_description import (
     FIGURE_TYPES,
     FigureDescriptionError,
     describe_figure_block,
+    figure_texts,
 )
 from app.services.parser_text import unescape
 from app.services.table_normalizer import join_fragments
@@ -139,8 +150,13 @@ class SectionResult:
     charts: int = 0
     #: Images described by the vision model.
     images: int = 0
+    #: Of the figures, those whose description was reused from the previous
+    #: rows rather than asked of the model again.
+    figures_reused: int = 0
     #: Blocks left out, by the reason: furniture, deferred, empty.
     skipped: dict[str, int] = field(default_factory=dict)
+    #: Chunks of an earlier Chunking run removed before the rows were replaced.
+    chunks_removed: int = 0
     seconds: float | None = None
     llm_seconds: float = 0.0
     error: str | None = None
@@ -239,13 +255,17 @@ def document_contents(
     )
 
 
-def build_queue(db: Session, doc_ids: Sequence[uuid.UUID]) -> SectionQueue:
+def build_queue(
+    db: Session, doc_ids: Sequence[uuid.UUID], *, force: bool = False
+) -> SectionQueue:
     """Decide, for each selected document, whether the run will take it.
 
     A document that already has content rows is left alone: the tree disables
     its box, but a ticked folder resolves to everything beneath it, and a run
-    over a folder must not quietly redo what was done. A document with no
-    headers has nothing to file blocks under.
+    over a folder must not quietly redo what was done. ``force`` — the page's
+    "force re-section" box — takes those documents back in: the run removes
+    their chunks and replaces their rows. A document with no headers has
+    nothing to file blocks under either way.
     """
     if not doc_ids:
         return SectionQueue(candidates=())
@@ -260,10 +280,10 @@ def build_queue(db: Session, doc_ids: Sequence[uuid.UUID]) -> SectionQueue:
     for doc in documents:
         headers = header_count(db, doc.id)
         contents = content_count(db, doc.id)
-        if contents:
-            reason = f"already sectioned: {contents} block{'' if contents == 1 else 's'} stored"
-        elif not headers:
+        if not headers:
             reason = "no headers stored — extract them on the Headers page first"
+        elif contents and not force:
+            reason = f"already sectioned: {contents} block{'' if contents == 1 else 's'} stored"
         else:
             reason = None
         candidates.append(
@@ -290,9 +310,11 @@ def _page_of(block: Any) -> int | None:
     return None
 
 
-def _first_block_on(blocks: Sequence[Any], page: int) -> int | None:
-    """Index of the first block whose page is ``page`` or later."""
+def _first_block_on(blocks: Sequence[Any], page: int, after: int = -1) -> int | None:
+    """Index of the first block past ``after`` whose page is ``page`` or later."""
     for index, block in enumerate(blocks):
+        if index <= after:
+            continue
         block_page = _page_of(block)
         if block_page is not None and block_page >= page:
             return index
@@ -302,24 +324,39 @@ def _first_block_on(blocks: Sequence[Any], page: int) -> int | None:
 def header_starts(headers: Sequence[Header], blocks: Sequence[Any]) -> list[int | None]:
     """The block index each header starts at, in the same order as ``headers``.
 
+    ``headers`` come in reading order, and each heading is looked for only
+    past the one before it (``floor``) — so a title repeated across chapters
+    resolves to its own occurrence, and the starts can never run backwards
+    and steal an earlier header's blocks.
+
     The heading block is looked for by title, after the contents page. It is
-    trusted when it sits on the page the header was recorded as starting on;
-    otherwise the first block of that page stands in. A header with no
-    recorded start page takes the located heading if there is one, and has no
-    start at all if there is none — its blocks then fall to the header before
-    it, which is honest about what is known.
+    trusted when it sits on the page the header was recorded as starting on,
+    and when there is no recorded page to check against. When the two
+    disagree, the first block of the recorded page stands in — unless the
+    located heading sits *before* that block: trusting the page there would
+    file the heading's own text under the header before it (a level-2 title
+    stored as its level-1 parent's text), so the located heading wins. A
+    header with neither a locatable heading nor a recorded page has no start
+    at all — its blocks then fall to the header before it, which is honest
+    about what is known.
     """
     contents = contents_page_index(blocks)
     starts: list[int | None] = []
+    floor = -1
     for header in headers:
-        located = locate_heading(blocks, _title_key(header.header), contents)
+        located = locate_heading(blocks, header.header, contents, after_index=floor)
         page = header.start_page_idx
         if page is None:
-            starts.append(located.index if located else None)
+            start = located.index if located else None
         elif located is not None and located.page == page:
-            starts.append(located.index)
+            start = located.index
         else:
-            starts.append(_first_block_on(blocks, page))
+            start = _first_block_on(blocks, page, after=floor)
+            if located is not None and (start is None or located.index < start):
+                start = located.index
+        if start is not None:
+            floor = start
+        starts.append(start)
     return starts
 
 
@@ -384,16 +421,65 @@ class _Tally:
     tables_without_body: int = 0
     charts: int = 0
     images: int = 0
+    figures_reused: int = 0
     llm_seconds: float = 0.0
 
 
+def _figure_key(
+    kind: str,
+    page_idx: int | None,
+    bbox: tuple[int | None, int | None, int | None, int | None],
+    caption: str | None,
+    footnote: str | None,
+) -> tuple:
+    """A figure's identity across runs, for reusing its stored description.
+
+    Everything in it comes from the parse output, not the model: a figure the
+    parser printed the same way is the same figure, whatever the crop's file
+    name happens to be this run.
+    """
+    return (kind, page_idx, *bbox, caption, footnote)
+
+
+def _stored_figure_descriptions(db: Session, doc_id: uuid.UUID) -> dict[tuple, str]:
+    """The figure descriptions an earlier run stored, keyed by `_figure_key`.
+
+    A re-section reads these before replacing the rows: a description the
+    vision model already wrote is reused, not asked for again. Empty for a
+    document sectioned for the first time.
+    """
+    rows = db.scalars(
+        select(HeaderContent).where(
+            HeaderContent.doc_id == doc_id,
+            HeaderContent.type.in_(FIGURE_TYPES),
+        )
+    ).all()
+    return {
+        _figure_key(
+            row.type,
+            row.page_idx,
+            (row.bbox_0, row.bbox_1, row.bbox_2, row.bbox_3),
+            row.caption,
+            row.footnote,
+        ): row.content
+        for row in rows
+        if row.content and row.content.strip()
+    }
+
+
 def _row_for(
-    db: Session, document: Document, block: Any, tally: _Tally
+    db: Session,
+    document: Document,
+    block: Any,
+    tally: _Tally,
+    reuse: dict[tuple, str] | None = None,
 ) -> HeaderContent | None:
     """The row a block becomes, or None when it is not stored.
 
-    Raises FigureDescriptionError for a chart or image the vision model could
-    not summarise — the caller decides what that means for the document.
+    ``reuse`` is the previous rows' figure descriptions by ``_figure_key``; a
+    figure found there keeps its description without a model call. Raises
+    FigureDescriptionError for a chart or image the vision model could not
+    summarise — the caller decides what that means for the document.
     """
     if not isinstance(block, dict):
         tally.skipped["not a block"] += 1
@@ -443,17 +529,28 @@ def _row_for(
     if kind in FIGURE_TYPES:
         # A chart and an image go the same way: the crop, the caption, the
         # footnote and the parser's reading all go to the vision model, and
-        # its summary is the content.
-        began = time.monotonic()
-        described = describe_figure_block(db, document, block)
-        tally.llm_seconds += time.monotonic() - began
+        # its summary is the content — unless the previous rows already hold
+        # this figure's description, which is then reused as it stands.
+        caption, footnote, _reading = figure_texts(block)
+        stored = (reuse or {}).get(
+            _figure_key(kind, row.page_idx, (x0, y0, x1, y1), caption, footnote)
+        )
+        if stored is not None:
+            row.content = stored
+            row.caption = caption
+            row.footnote = footnote
+            tally.figures_reused += 1
+        else:
+            began = time.monotonic()
+            described = describe_figure_block(db, document, block)
+            tally.llm_seconds += time.monotonic() - began
+            row.content = described.text
+            row.caption = described.caption
+            row.footnote = described.footnote
         if kind == "chart":
             tally.charts += 1
         else:
             tally.images += 1
-        row.content = described.text
-        row.caption = described.caption
-        row.footnote = described.footnote
         return row
 
     # text, page_footnote, and any other block that carries a text.
@@ -475,7 +572,11 @@ def document_headers_in_order(db: Session, doc_id: uuid.UUID) -> list[Header]:
 
 
 def run_sections(db: Session, document: Document) -> SectionResult:
-    """File one document's blocks under its headers, replacing earlier rows."""
+    """File one document's blocks under its headers, replacing earlier rows.
+
+    A re-run also removes the document's chunks: they were built from the
+    rows being replaced, so they cannot outlive them.
+    """
     began = time.monotonic()
 
     def failed(reason: str) -> SectionResult:
@@ -498,13 +599,17 @@ def run_sections(db: Session, document: Document) -> SectionResult:
 
     assigned = assign_headers(headers, blocks)
 
+    # What the previous run's vision model wrote, read before the rows are
+    # replaced: a figure that has not changed keeps its description for free.
+    reuse = _stored_figure_descriptions(db, document.id)
+
     tally = _Tally()
     rows: list[HeaderContent] = []
     for index, block in enumerate(blocks):
         page = _page_of(block)
         where = f"page_idx {page}" if page is not None else f"block {index}"
         try:
-            row = _row_for(db, document, block, tally)
+            row = _row_for(db, document, block, tally, reuse)
         except FigureDescriptionError as exc:
             return failed(f"{block.get('type')} at {where} could not be summarised: {exc}")
         if row is None:
@@ -515,6 +620,13 @@ def run_sections(db: Session, document: Document) -> SectionResult:
         rows.append(row)
 
     # Everything that could fail has; the replacement is one transaction.
+    # The document's chunks go first: they were cut from the rows being
+    # replaced (head_content_ids), so a re-section must not leave them
+    # pointing at rows that no longer exist. Their vectors are reconciled by
+    # the embedding stage, which deletes points no current chunk owns.
+    chunks_removed = db.execute(
+        delete(Chunk).where(Chunk.doc_id == document.id)
+    ).rowcount
     db.execute(delete(HeaderContent).where(HeaderContent.doc_id == document.id))
     db.add_all(rows)
     db.commit()
@@ -528,7 +640,9 @@ def run_sections(db: Session, document: Document) -> SectionResult:
         tables_without_body=tally.tables_without_body,
         charts=tally.charts,
         images=tally.images,
+        figures_reused=tally.figures_reused,
         skipped=dict(tally.skipped),
+        chunks_removed=chunks_removed or 0,
         seconds=time.monotonic() - began,
         llm_seconds=tally.llm_seconds,
     )
