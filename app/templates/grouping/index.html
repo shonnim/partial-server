@@ -42,12 +42,11 @@
               hx-swap="innerHTML"
               hx-indicator="#group-spinner">
           <label class="group-label" for="group-id">Group id</label>
+          {#- The datalist this input suggests from sits inside the Groups
+              panel below, so it refreshes when a description is saved. -#}
           <input type="text" class="group-input" id="group-id" name="group_id"
                  list="known-groups" autocomplete="off" spellcheck="false"
                  maxlength="{{ max_length }}" placeholder="e.g. budget-2024">
-          <datalist id="known-groups">
-            {% for name in known_groups %}<option value="{{ name }}">{% endfor %}
-          </datalist>
           <div class="side-box-actions group-actions">
             <button type="submit" class="btn btn-primary" id="btn-save-group">
               💾 Save group id
@@ -68,6 +67,9 @@
 
       {#- Where the Save button's reply lands. Empty until the first click. -#}
       <div id="group-result"></div>
+
+      {#- The group id list with its hand-written descriptions. -#}
+      {% include "grouping/_partials/groups.html" %}
     </aside>
   </div>
 

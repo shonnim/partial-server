@@ -4,11 +4,13 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.services.grouping import (
+    MAX_DESCRIPTION_LENGTH,
     MAX_GROUP_BATCH,
     MAX_GROUP_ID_LENGTH,
     assign_group,
+    list_groups,
     normalise_group_id,
-    suggested_group_ids,
+    save_description,
 )
 from app.services.tree import (
     DEFAULT_FILE_PAGE,
@@ -36,7 +38,8 @@ def grouping_page(request: Request, db: Session = Depends(get_db)) -> HTMLRespon
             "failed": failed,
             "max_batch": MAX_GROUP_BATCH,
             "max_length": MAX_GROUP_ID_LENGTH,
-            "known_groups": suggested_group_ids(db),
+            "max_description": MAX_DESCRIPTION_LENGTH,
+            "groups": list_groups(db),
         },
     )
 
@@ -97,4 +100,42 @@ def grouping_assign(
 
     return templates.TemplateResponse(
         request, "grouping/_partials/result.html", {"result": result}
+    )
+
+
+@router.post("/describe", response_class=HTMLResponse, name="grouping_describe")
+def grouping_describe(
+    request: Request,
+    group_id: str = Form(""),
+    description: str = Form(""),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """Save one group id's hand-written description and re-render the list.
+
+    An empty description removes the stored one. Errors render inside the
+    list panel too — the caller is a row's save button, and a 4xx would
+    leave the panel blank.
+    """
+    label = normalise_group_id(group_id)
+    error: str | None = None
+    if label is None:
+        error = "The row lost its group id. Reload the page."
+    elif len(label) > MAX_GROUP_ID_LENGTH:
+        error = f"Group id is too long. Keep it under {MAX_GROUP_ID_LENGTH} characters."
+    else:
+        text = description.strip() or None
+        if text is not None and len(text) > MAX_DESCRIPTION_LENGTH:
+            error = f"Keep a description under {MAX_DESCRIPTION_LENGTH} characters."
+        else:
+            save_description(db, label, text)
+
+    return templates.TemplateResponse(
+        request,
+        "grouping/_partials/groups.html",
+        {
+            "groups": list_groups(db),
+            "max_description": MAX_DESCRIPTION_LENGTH,
+            "error": error,
+            "saved": None if error else label,
+        },
     )

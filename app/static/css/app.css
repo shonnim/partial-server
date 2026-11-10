@@ -1642,6 +1642,44 @@ dialog.modal-transfer { width: min(1300px, 96vw); height: min(860px, 92vh); }
 .group-actions { margin-bottom: 10px; }
 #group-result .check-result { margin-bottom: 0; }
 
+/* The group list: every known id with its hand-written description. */
+.group-table {
+  width: 100%;
+  margin-bottom: 10px;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.group-table th {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line-strong);
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: left;
+}
+.group-table td {
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+.group-table tr:last-child td { border-bottom: none; }
+.group-table tr.is-saved td { background: var(--ok-soft); }
+.group-table-id { font-weight: 600; white-space: nowrap; }
+.group-table-count {
+  margin-left: 4px;
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 400;
+}
+.group-table-empty { color: var(--ink-faint); }
+.group-describe { display: flex; align-items: center; gap: 6px; }
+.group-describe .group-input {
+  height: 30px;
+  margin-bottom: 0;
+  font-size: 12.5px;
+}
+.group-describe .btn { height: 30px; padding: 0 9px; }
+
 /* ---------- chunking ---------- */
 
 /* Stored chunks: the Chunking page's count on a row, and the way into them. */

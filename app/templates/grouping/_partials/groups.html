@@ -1,0 +1,67 @@
+{#
+  Every known group id — carried by a document, registered with a strategy,
+  or described by hand — with its description (the group's Korean name,
+  e.g. oft-1 → 해외재정동향) and how many documents carry it. Each row is
+  its own form; saving posts to grouping_describe, which re-renders this
+  whole section, so the panel never goes stale row by row.
+
+  The datalist for the group id input lives here too: a freshly saved
+  description shows up in the suggestions without a reload.
+#}
+<section class="card side-box" id="group-list">
+  <div class="side-box-head">
+    <span class="side-box-title">📒 Groups</span>
+    <span class="pill total">{{ groups|length }}</span>
+  </div>
+
+  {% if error %}<p class="side-error">{{ error }}</p>{% endif %}
+
+  <table class="group-table">
+    <thead>
+      <tr>
+        <th>Group id</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for group in groups %}
+        <tr{% if saved == group.group_id %} class="is-saved"{% endif %}>
+          <td class="group-table-id">
+            {{ group.group_id }}
+            <span class="group-table-count"
+                  title="documents carrying this id">{{ "{:,}".format(group.documents) }}</span>
+          </td>
+          <td>
+            <form class="group-describe"
+                  hx-post="{{ url_for('grouping_describe') }}"
+                  hx-target="#group-list"
+                  hx-swap="outerHTML">
+              <input type="hidden" name="group_id" value="{{ group.group_id }}">
+              <input type="text" class="group-input group-desc-input" name="description"
+                     value="{{ group.description or '' }}"
+                     maxlength="{{ max_description }}"
+                     placeholder="예: 해외재정동향"
+                     autocomplete="off" spellcheck="false">
+              <button type="submit" class="btn" title="Save the description">💾</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr>
+          <td colspan="2" class="group-table-empty">
+            No groups yet — save a group id onto some documents first.
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <p class="side-note">
+    Descriptions are names for people; every stage keys on the id itself.
+    Saving an empty box removes the description.
+  </p>
+
+  <datalist id="known-groups">
+    {% for group in groups %}<option value="{{ group.group_id }}"{% if group.description %} label="{{ group.description }}"{% endif %}>{% endfor %}
+  </datalist>
+</section>
