@@ -50,7 +50,9 @@ What is stored, by block type:
   re-section, a figure whose identity has not changed — same type, page,
   bounding box, caption and footnote — keeps the description the previous
   run stored instead of going back to the model; only a figure the previous
-  rows do not cover is summarised anew.
+  rows do not cover is summarised anew. A figure on the first page
+  (``page_idx`` 0) is the cover's design, not content: it is skipped
+  outright, with no model call and no row.
 * anything else with a text — stored under its own type.
 
 A document is written all at once or not at all. Every figure is summarised
@@ -93,6 +95,10 @@ MAX_SECTION_BATCH = 50
 
 # Block types that frame a page rather than carry its content.
 SKIPPED_TYPES = frozenset({"header", "footer", "aside_text", "page_number"})
+
+# The cover's page index. A figure there is the document's design — the title
+# art — never content, so it is not stored and never sent to the vision model.
+COVER_PAGE_IDX = 0
 
 # Block types whose handling has not been decided yet. Left out, and counted,
 # rather than stored in a shape that would have to be redone. Empty for now;
@@ -527,6 +533,10 @@ def _row_for(
         return row
 
     if kind in FIGURE_TYPES:
+        if row.page_idx == COVER_PAGE_IDX:
+            # Cover art: the document's design, not content.
+            tally.skipped["cover figure"] += 1
+            return None
         # A chart and an image go the same way: the crop, the caption, the
         # footnote and the parser's reading all go to the vision model, and
         # its summary is the content — unless the previous rows already hold

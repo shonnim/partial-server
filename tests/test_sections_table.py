@@ -93,6 +93,24 @@ def test_chart_block_goes_through_the_vision_model(monkeypatch) -> None:
     assert tally.images == 0
 
 
+def test_a_cover_page_figure_is_skipped_without_a_model_call(monkeypatch) -> None:
+    """The image on the first page is the document's design, not content:
+    no row, and the vision model is never reached."""
+    from app.services import sections
+
+    def never(db, document, block):  # pragma: no cover - the point is it is not reached
+        raise AssertionError("the model must not be called for cover art")
+
+    monkeypatch.setattr(sections, "describe_figure_block", never)
+
+    tally = _Tally()
+    row = _row_for(None, None, {"type": "image", "page_idx": 0}, tally)
+
+    assert row is None
+    assert tally.skipped["cover figure"] == 1
+    assert tally.images == 0 and tally.charts == 0
+
+
 FIGURE = {
     "type": "image",
     "img_path": "images/def.jpg",
