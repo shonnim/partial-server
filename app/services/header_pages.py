@@ -26,7 +26,13 @@ from sqlalchemy.orm import Session
 
 from app.doc_extract import DocExtractError, parse_pages
 from app.models.document import Document, HasHeader
-from app.services.header_bpa import locate_toc, page_index_ranges_bpa, parse_toc
+from app.services.header_bpa import (
+    locate_toc,
+    page_index_ranges_bpa,
+    page_index_ranges_bpa2,
+    parse_toc,
+    parse_toc_bpa2,
+)
 from app.services.header_extraction import (
     ExtractedHeader,
     ExtractionError,
@@ -45,6 +51,12 @@ DEFAULT_END_PAGE = 3
 # The most pages past the start one request may ask for: every page is a VLM
 # pass, so a typo like 3..300 would hold the queue for an hour.
 MAX_PAGE_SPAN = 10
+
+# The ceiling for a range a strategy's locate hook derived instead. The cap
+# above guards against toolbar typos; a located range is read off the
+# document's own content list, and a real TOC can run long — the 분석종합
+# volume's is ~48 pages — so it gets more room, not none.
+MAX_LOCATED_SPAN = 60
 
 # The whole PDF is uploaded to the parsing service, whichever pages it is
 # asked for, so a source file has to fit in memory here first.
@@ -101,6 +113,18 @@ GROUP_STRATEGIES: dict[str, GroupStrategy] = {
         locate=locate_toc,
         extract=parse_toc,
         ranges=page_index_ranges_bpa,
+    ),
+    # The series' other volumes — 거시·총량 분석, 성인지 예산서 분석,
+    # 분석종합 — share one agency-less layout: parts and chapters (분석종합),
+    # roman sections, numbered entries, hangul sub-entries (성인지). Same
+    # locate as bpa-1: the CONTENTS marker opens the TOC and printed p.3
+    # opens the body in every volume.
+    "bpa-2": GroupStrategy(
+        start_page=3,
+        end_page=12,
+        locate=locate_toc,
+        extract=parse_toc_bpa2,
+        ranges=page_index_ranges_bpa2,
     ),
 }
 
@@ -263,7 +287,7 @@ def run_pages(
         located = strategy.locate(blocks)
         if located is not None:
             start_page, end_page = located
-            end_page = min(end_page, start_page + MAX_PAGE_SPAN)
+            end_page = min(end_page, start_page + MAX_LOCATED_SPAN)
 
     clamped = page_range(start_page, end_page, document.pages)
     if clamped is None:

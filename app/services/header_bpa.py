@@ -20,6 +20,22 @@ page sits two pages before its Section I; and sections are contiguous, so
 
 ``parse_toc`` and ``page_index_ranges_bpa`` plug into the Group method as the
 ``extract`` and ``ranges`` hooks of the group's ``GroupStrategy``.
+
+The bpa-2 strategy covers the other volumes of the same 예산안분석 series —
+거시·총량 분석, 성인지 예산서 분석, 분석종합 — whose contents lists have no
+agency brackets. Their lines stack differently per volume:
+
+    제1부 거시·총량 분석 등          part        (분석종합 only)
+      제1장|국회운영위원회           chapter     (분석종합 only)
+        I. 국회 / 17                 roman section
+          1. <item> 17               numbered entry
+            가. 현황 19              hangul entry (성인지 only)
+
+``parse_toc_bpa2`` assigns levels by rank — part, chapter, roman, arabic,
+hangul — compressed so the shallowest kind a volume uses is level 1; the
+page arithmetic is the same as bpa-1's, minus the agency book-face offset.
+The 분석종합 TOC alone runs ~48 pages, which is why a located range is
+allowed past the toolbar's span cap.
 """
 
 import re
@@ -114,6 +130,40 @@ _ARABIC_START = re.compile(r"^\d{1,2}\s*[.．]")
 # parse dropped, or the first half of a wrapped title.
 _BARE_NUMBERED = re.compile(r"^(?:I{1,3}|\d{1,2})\s*[.．]\s*(?P<title>\S.*?)$")
 
+# ---- the bpa-2 line kinds ------------------------------------------------------
+#
+# Parts and chapters appear only in the 분석종합 volume, the hangul ordinals
+# only in the 성인지 one. A part or chapter keeps its whole line as the
+# title. The spacing varies per parse ("제1장|국회…", "제 2 부 부처별…"),
+# and a body sentence running straight on ("제2부에서는…") has no boundary
+# after 부/장, so one is required.
+_PART = re.compile(r"^(?P<title>제\s*\d+\s*부(?:\s+\S.*)?)$")
+_CHAPTER = re.compile(r"^(?P<title>제\s*\d+\s*장\s*(?:[|｜]\s*\S.*|\s+\S.*)?)$")
+
+# The hangul ordinal sequence the series numbers sub-items with.
+_HANGUL_ORDINALS = "가나다라마바사아자차카타파하"
+
+# bpa-2's roman sections are agencies and run past III (IV, V, …), and their
+# titles vary, so no fixed-title rescue applies.
+_ROMAN2 = re.compile(
+    r"^(?P<num>[IVX]{1,4})\s*[.．]\s*(?P<title>.+?)"
+    r"(?:\s*(?:/|[.·․‥…]+)\s*(?P<page>\d{1,4}))?\s*$"
+)
+_HANGUL = re.compile(
+    rf"^(?P<num>[{_HANGUL_ORDINALS}])\s*[.．]\s*(?P<title>.+?)"
+    r"(?:\s*(?:/|[.·․‥…]+)\s*|\s+|(?<=[^\d\s]))(?P<page>\d{1,4})\s*$"
+)
+
+_ENTRY_START2 = re.compile(
+    rf"^(?:\[|제\s*\d+\s*[부장]|(?:[IVX]{{1,4}}|\d{{1,2}}|[{_HANGUL_ORDINALS}])\s*[.．])"
+)
+_NUMBERED_START2 = re.compile(rf"^(?:\d{{1,2}}|[{_HANGUL_ORDINALS}])\s*[.．]")
+
+# How the kinds nest. Levels are not fixed per kind: the shallowest kind a
+# volume actually uses becomes level 1 (거시·총량 opens at the roman rank,
+# 분석종합 at the part rank), which the rank stack below works out.
+_RANK_PART, _RANK_CHAPTER, _RANK_ROMAN, _RANK_ARABIC, _RANK_HANGUL = range(1, 6)
+
 
 def _lines(markdown: str) -> list[str]:
     """The TOC text as bare lines, markdown dressing stripped."""
@@ -125,14 +175,33 @@ def _lines(markdown: str) -> list[str]:
     return lines
 
 
-def _dewrap(lines: list[str]) -> list[str]:
+def _incomplete_bpa1(line: str) -> bool:
+    """A bpa-1 numbered line that opened an entry but lacks its page."""
+    return _ARABIC_START.match(line) is not None and _ARABIC.match(line) is None
+
+
+def _incomplete_bpa2(line: str) -> bool:
+    """The bpa-2 twin: arabic or hangul ordinal, page still missing."""
+    return (
+        _NUMBERED_START2.match(line) is not None
+        and _ARABIC.match(line) is None
+        and _HANGUL.match(line) is None
+    )
+
+
+def _dewrap(
+    lines: list[str],
+    *,
+    incomplete=_incomplete_bpa1,
+    entry_start: re.Pattern[str] = _ENTRY_START,
+) -> list[str]:
     """Rejoin numbered entries whose titles wrapped onto the next line.
 
     A long title carries its dot leaders and page on the continuation line,
-    so the numbered line above it fails the page-required rule. A numbered
-    line still missing its page absorbs following lines that do not open an
-    entry of their own — at most two, so a stray pageless number cannot
-    swallow half a page of text.
+    so the numbered line above it fails the page-required rule. A line
+    ``incomplete`` says is still missing its page absorbs following lines
+    that do not open an entry of their own (``entry_start``) — at most two,
+    so a stray pageless number cannot swallow half a page of text.
     """
     merged: list[str] = []
     absorbed = 0
@@ -140,9 +209,8 @@ def _dewrap(lines: list[str]) -> list[str]:
         wraps = (
             bool(merged)
             and absorbed < 2
-            and _ARABIC_START.match(merged[-1]) is not None
-            and _ARABIC.match(merged[-1]) is None
-            and _ENTRY_START.match(line) is None
+            and incomplete(merged[-1])
+            and entry_start.match(line) is None
         )
         if wraps:
             merged[-1] = f"{merged[-1]} {line}"
@@ -228,6 +296,100 @@ def parse_toc(markdown: str) -> list[ExtractedHeader]:
     return headers
 
 
+def parse_toc_bpa2(markdown: str) -> list[ExtractedHeader]:
+    """The parsed pages of a bpa-2 contents list, as ordered headings.
+
+    Deterministic — no model call. Lines are one of five kinds — part,
+    chapter, roman section, numbered entry, hangul sub-entry — and the level
+    of each heading is its depth among the kinds the volume actually uses:
+    a rank stack pops everything at or below the arriving kind, so 거시·총량
+    opens at level 1 with its roman sections while 분석종합 opens with its
+    parts. An entry arriving before any section, and any line matching
+    nothing, is ignored.
+    """
+    text = (
+        markdown.replace("Ⅰ", "I")
+        .replace("Ⅱ", "II")
+        .replace("Ⅲ", "III")
+        .replace("Ⅳ", "IV")
+        .replace("Ⅴ", "V")
+    )
+
+    headers: list[ExtractedHeader] = []
+    ranks: list[int] = []
+    stack: list[int] = []
+    seen: set[int] = set()
+
+    lines = _dewrap(
+        _lines(text), incomplete=_incomplete_bpa2, entry_start=_ENTRY_START2
+    )
+    for line in lines:
+        page: str | None = None
+        if match := _PART.match(line):
+            rank, title = _RANK_PART, match.group("title")
+        elif match := _CHAPTER.match(line):
+            rank, title = _RANK_CHAPTER, match.group("title")
+        elif match := _ROMAN2.match(line):
+            rank = _RANK_ROMAN
+            title = f"{match.group('num')}. {match.group('title')}"
+            page = match.group("page")
+        elif match := _ARABIC.match(line):
+            rank = _RANK_ARABIC
+            title = f"{match.group('num')}. {match.group('title')}"
+            page = match.group("page")
+        elif match := _HANGUL.match(line):
+            rank = _RANK_HANGUL
+            title = f"{match.group('num')}. {match.group('title')}"
+            page = match.group("page")
+        else:
+            continue
+
+        if rank >= _RANK_ARABIC and not stack:
+            continue  # an entry before any part, chapter or section
+
+        title = normalize_title(title)
+        if not title:
+            continue
+
+        while stack and stack[-1] >= rank:
+            stack.pop()
+        headers.append(
+            ExtractedHeader(
+                title=title,
+                level=len(stack) + 1,
+                start_page=int(page) if page is not None else None,
+            )
+        )
+        ranks.append(rank)
+        stack.append(rank)
+        seen.add(rank)
+
+    # The located range runs up to the page before printed p.3, which in the
+    # 분석종합 volume is the first part's own divider page — its "제 1 부"
+    # re-matches as a part. A pageless part, chapter or section with nothing
+    # beneath it at the very end is that divider, not an entry, and left in
+    # place it would hold the real last entries' ends open.
+    while (
+        headers
+        and headers[-1].start_page is None
+        and ranks[-1] <= _RANK_ROMAN
+    ):
+        headers.pop()
+        ranks.pop()
+
+    if _RANK_ROMAN not in seen:
+        raise ExtractionError(
+            "No roman section (I., II., …) was found in the parsed pages — "
+            "the bpa-2 TOC pattern did not match; check the page range."
+        )
+    if _RANK_ARABIC not in seen:
+        raise ExtractionError(
+            "Roman sections were found but no numbered entries under them — "
+            "the bpa-2 TOC pattern did not match the entry lines."
+        )
+    return headers
+
+
 def _front_matter_offset(
     headers: Sequence[ExtractedHeader], printed: dict[int, int]
 ) -> int | None:
@@ -248,19 +410,21 @@ def _front_matter_offset(
     return votes.most_common(1)[0][0]
 
 
-def page_index_ranges_bpa(
-    headers: Sequence[ExtractedHeader], blocks: Any
+def _arithmetic_ranges(
+    headers: Sequence[ExtractedHeader],
+    blocks: Any,
+    *,
+    level_leads: dict[int, int],
 ) -> list[tuple[int | None, int | None]]:
     """``(start_page_idx, end_page_idx)`` per entry, by the series' arithmetic.
 
     Starts: ``printed + c`` for every entry with a printed page; an entry
-    without one takes its first child's start — except an agency, whose
-    book-face page sits ``AGENCY_LEAD_PAGES`` before its Section I.
+    without one takes its first child's start, minus its level's entry in
+    ``level_leads`` — the pages a divider sits on before the content begins.
 
     Ends: sections are contiguous, so an entry ends one page before the next
-    entry at its level or shallower starts; the entry before an agency ends
-    one page before the agency's book-face page, and the last entry at its
-    level runs to the document's last page.
+    entry at its level or shallower starts, and the last entry at its level
+    runs to the document's last page.
     """
     if not isinstance(blocks, list) or not headers:
         return [(None, None)] * len(headers)
@@ -278,8 +442,8 @@ def page_index_ranges_bpa(
             if idx >= 0 and (last is None or idx <= last):
                 starts[i] = idx
 
-    # Backwards, so a roman section resolves from its entries before the
-    # agency above it asks for the roman section's start.
+    # Backwards, so a section resolves from its entries before the level
+    # above it asks for the section's start.
     for i in range(len(headers) - 1, -1, -1):
         if starts[i] is not None:
             continue
@@ -288,8 +452,7 @@ def page_index_ranges_bpa(
             continue
         if starts[child] is None:
             continue
-        lead = AGENCY_LEAD_PAGES if headers[i].level == 1 else 0
-        starts[i] = max(0, starts[child] - lead)
+        starts[i] = max(0, starts[child] - level_leads.get(headers[i].level, 0))
 
     ranges: list[tuple[int | None, int | None]] = []
     for i, entry in enumerate(headers):
@@ -303,5 +466,23 @@ def page_index_ranges_bpa(
             end = None
         else:
             end = starts[following] - 1
+            if starts[i] is not None and end < starts[i]:
+                # Two entries opening on the same page: the earlier one ends
+                # on the page it starts on, not the page before it.
+                end = starts[i]
         ranges.append((starts[i], end))
     return ranges
+
+
+def page_index_ranges_bpa(
+    headers: Sequence[ExtractedHeader], blocks: Any
+) -> list[tuple[int | None, int | None]]:
+    """bpa-1's arithmetic: an agency's book-face page sits two before its I."""
+    return _arithmetic_ranges(headers, blocks, level_leads={1: AGENCY_LEAD_PAGES})
+
+
+def page_index_ranges_bpa2(
+    headers: Sequence[ExtractedHeader], blocks: Any
+) -> list[tuple[int | None, int | None]]:
+    """bpa-2's arithmetic: the same, with no divider lead at any level."""
+    return _arithmetic_ranges(headers, blocks, level_leads={})

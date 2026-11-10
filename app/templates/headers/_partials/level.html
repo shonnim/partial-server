@@ -26,6 +26,9 @@
         <span class="tree-name" title="{{ folder.path }}">{{ folder.name }}</span>
       </button>
       <span class="tree-badges">
+        {% if folder.with_headers %}
+          <span class="pill headers" title="{{ folder.with_headers }} of {{ folder.total }} with headers stored">📑 {{ folder.with_headers }}</span>
+        {% endif %}
         <span class="pill total">{{ folder.total }}</span>
         <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
       </span>

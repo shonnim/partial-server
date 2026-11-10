@@ -12,7 +12,9 @@ from app.services.header_bpa import (
     TOC_FALLBACK_SPAN,
     locate_toc,
     page_index_ranges_bpa,
+    page_index_ranges_bpa2,
     parse_toc,
+    parse_toc_bpa2,
 )
 from app.services.header_extraction import ExtractedHeader, ExtractionError
 from app.services.header_pages import strategy_for
@@ -264,3 +266,140 @@ def test_bpa_1_is_registered_with_its_hooks() -> None:
     assert strategy.extract is parse_toc
     assert strategy.ranges is page_index_ranges_bpa
     assert strategy.llm is None  # no model call either way
+
+
+# ---- bpa-2: the series' agency-less volumes -------------------------------------
+
+
+def test_bpa2_two_level_volume_opens_at_the_roman_rank() -> None:
+    # The 거시·총량 volume: roman sections and numbered entries, nothing else.
+    headers = parse_toc_bpa2(
+        "# 차 레\n# CONTENTS\n"
+        "# I.「2016년도 예산안」개요 / 3\n"
+        "1. 세입·세출 예산안 및 기금운용계획안 3\n"
+        "2. 총수입·총지출 5\n"
+        "# Ⅱ. 총량 분석 / 8\n"
+        "1. 거시경제 전망 8\n"
+        "# Ⅲ. 중점 분석 / 18\n"
+        "5.「2016년도 예산안 편성 세부지침」준수 여부 54"
+    )
+
+    assert [(h.level, h.title, h.start_page) for h in headers] == [
+        (1, "I. 「2016년도 예산안」개요", 3),
+        (2, "1. 세입·세출 예산안 및 기금운용계획안", 3),
+        (2, "2. 총수입·총지출", 5),
+        (1, "II. 총량 분석", 8),
+        (2, "1. 거시경제 전망", 8),
+        (1, "III. 중점 분석", 18),
+        (2, "5. 「2016년도 예산안 편성 세부지침」준수 여부", 54),
+    ]
+
+
+def test_bpa2_hangul_sub_entries_nest_under_their_item() -> None:
+    # The 성인지 volume: 가./나. sub-entries, including a wrapped one.
+    headers = parse_toc_bpa2(
+        "# Ⅲ. 주요 부처별 분석 / 19\n"
+        "1. 법무부 19\n"
+        "가. 현황 19\n"
+        "나. 분석 의견: 「교정교화」 사업 성과목표의 적정성 검토 필요\n"
+        "(교정본부) 21\n"
+        "2. 미래창조과학부 22"
+    )
+
+    assert [(h.level, h.start_page) for h in headers] == [
+        (1, 19),
+        (2, 19),
+        (3, 19),
+        (3, 21),
+        (2, 22),
+    ]
+    assert headers[3].title.endswith("(교정본부)")
+
+
+def test_bpa2_parts_and_chapters_deepen_the_tree() -> None:
+    # The 분석종합 volume: part 1 holds roman sections directly; part 2 holds
+    # chapters, whose roman sections are one level deeper.
+    headers = parse_toc_bpa2(
+        "# 제1부 거시·총량 분석 등\n"
+        "# I.「2016년도 예산안」개요 / 3\n"
+        "1. 세입·세출 예산안 및 기금운용계획안 3\n"
+        "# IV. 성인지 예산서 분석 / 12\n"
+        "# 제 2 부 부처별 분석\n"
+        "# 제1장|국회운영위원회\n"
+        "# I. 국회 / 17\n"
+        "1. 사무실 환경 개선을 위한 카펫 바닥재 교체 필요 (관리국) 17\n"
+        "# 제2장 | 법제사법위원회\n"
+        "# I. 법무부 / 21\n"
+        "# Ⅱ. 법제처 / 28\n"
+        "1. 집행실적 고려 필요 (법령정보정책관실) 28"
+    )
+
+    assert [(h.level, h.title, h.start_page) for h in headers] == [
+        (1, "제1부 거시·총량 분석 등", None),
+        (2, "I. 「2016년도 예산안」개요", 3),
+        (3, "1. 세입·세출 예산안 및 기금운용계획안", 3),
+        (2, "IV. 성인지 예산서 분석", 12),
+        (1, "제 2 부 부처별 분석", None),
+        (2, "제1장|국회운영위원회", None),
+        (3, "I. 국회", 17),
+        (4, "1. 사무실 환경 개선을 위한 카펫 바닥재 교체 필요 (관리국)", 17),
+        (2, "제2장 | 법제사법위원회", None),
+        (3, "I. 법무부", 21),
+        (3, "II. 법제처", 28),
+        (4, "1. 집행실적 고려 필요 (법령정보정책관실)", 28),
+    ]
+
+
+def test_bpa2_entries_before_any_section_are_noise() -> None:
+    headers = parse_toc_bpa2("1. 떠돌이 항목 3\nI. 개요 / 3\n1. 현황 3")
+
+    assert [h.title for h in headers] == ["I. 개요", "1. 현황"]
+
+
+def test_bpa2_a_trailing_divider_page_is_not_an_entry() -> None:
+    # The located range ends on the page before printed p.3 — the first
+    # part's divider page, whose text re-matches as a pageless part.
+    headers = parse_toc_bpa2("# I. 개요 / 3\n1. 현황 3\n# 제 1 부")
+
+    assert [h.title for h in headers] == ["I. 개요", "1. 현황"]
+
+
+def test_bpa2_without_roman_sections_is_an_error() -> None:
+    with pytest.raises(ExtractionError, match="No roman section"):
+        parse_toc_bpa2("본문 첫 쪽\n예산 개요에 관한 문단.")
+
+
+def test_bpa2_sections_without_entries_is_an_error() -> None:
+    with pytest.raises(ExtractionError, match="no numbered entries"):
+        parse_toc_bpa2("I. 개요 / 3\nⅡ. 총량 분석 / 8")
+
+
+def test_bpa2_ranges_have_no_divider_lead() -> None:
+    # A part or chapter starts where its first child starts — no book-face
+    # offset — and ends contiguously before the next entry at its level.
+    headers = parse_toc_bpa2(
+        "# 제1부 총론\n# I. 개요 / 3\n1. 현황 3\n# 제 2 부 각론\n# I. 분석 / 10\n1. 항목 10"
+    )
+    blocks = [
+        {"type": "page_number", "page_idx": 15, "text": "- 3 -"},
+        {"type": "page_number", "page_idx": 22, "text": "- 10 -"},
+        {"type": "text", "page_idx": 60, "text": "뒤표지"},
+    ]
+
+    assert page_index_ranges_bpa2(headers, blocks) == [
+        (15, 21),  # 제1부: starts with I, no lead
+        (15, 21),
+        (15, 21),
+        (22, 60),  # 제2부 runs to the end of the document
+        (22, 60),
+        (22, 60),
+    ]
+
+
+def test_bpa_2_is_registered_with_its_hooks() -> None:
+    strategy = strategy_for("bpa-2")
+
+    assert strategy.locate is locate_toc
+    assert strategy.extract is parse_toc_bpa2
+    assert strategy.ranges is page_index_ranges_bpa2
+    assert strategy.llm is None
