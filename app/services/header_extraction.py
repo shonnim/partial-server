@@ -472,35 +472,22 @@ def last_page_index(blocks: Sequence[Any]) -> int | None:
     return max(known) if known else None
 
 
-def page_index_ranges(
-    headers: Sequence[ExtractedHeader], blocks: Any
-) -> list[tuple[int | None, int | None]]:
-    """``(start_page_idx, end_page_idx)`` for each entry, in the same order.
+def locate_starts(
+    headers: Sequence[ExtractedHeader], blocks: list[Any]
+) -> tuple[list[int | None], list[LocatedHeading | None]]:
+    """Each entry's start ``page_idx``, and the heading block it was read from.
 
-    ``blocks`` is a document's content list. Both ends are read from it:
-
-    * **start** is the ``page_idx`` of the body block that is the entry's
-      heading (see ``locate_heading``). The entry's printed ``start_page`` is
-      a cross-check, not a requirement: when the page that number was printed
-      on disagrees, the start is left unknown rather than trusted, but a
-      number the content list never captured has nothing to disagree with and
-      the located heading stands on its own. A heading that cannot be located
-      at all falls back to the page its printed number sits on — the content
-      list knows the page even when the heading's text does not match.
-    * **end** looks at the next entry at the same level or shallower — the
-      next section for a section, the next chapter for a chapter's last
-      section. If that heading opens its page the entry ends on the page
-      before; if it shares the page with what came before, the entry runs onto
-      that page too — as it also does when the following start is known only
-      from its printed number, where opening the page cannot be checked. The
-      last entry at its level runs to the last page.
+    The start is the page of the body block that is the entry's heading (see
+    ``locate_heading``). The entry's printed ``start_page`` is a cross-check,
+    not a requirement: when the page that number was printed on disagrees, the
+    start is left unknown rather than trusted, but a number the content list
+    never captured has nothing to disagree with and the located heading stands
+    on its own. A heading that cannot be located at all falls back to the page
+    its printed number sits on — the content list knows the page even when the
+    heading's text does not match. The located entry is None then.
     """
-    if not isinstance(blocks, list):
-        return [(None, None)] * len(headers)
-
     contents = contents_page_index(blocks)
     printed = page_number_index(blocks)
-    last = last_page_index(blocks)
 
     located = [locate_heading(blocks, h.title, contents) for h in headers]
 
@@ -517,6 +504,31 @@ def page_index_ranges(
             starts.append(promised)
         else:
             starts.append(None)
+    return starts, located
+
+
+def page_index_ranges(
+    headers: Sequence[ExtractedHeader], blocks: Any
+) -> list[tuple[int | None, int | None]]:
+    """``(start_page_idx, end_page_idx)`` for each entry, in the same order.
+
+    ``blocks`` is a document's content list. Both ends are read from it:
+
+    * **start** comes from ``locate_starts``: the located heading block,
+      cross-checked against the printed page number.
+    * **end** looks at the next entry at the same level or shallower — the
+      next section for a section, the next chapter for a chapter's last
+      section. If that heading opens its page the entry ends on the page
+      before; if it shares the page with what came before, the entry runs onto
+      that page too — as it also does when the following start is known only
+      from its printed number, where opening the page cannot be checked. The
+      last entry at its level runs to the last page.
+    """
+    if not isinstance(blocks, list):
+        return [(None, None)] * len(headers)
+
+    last = last_page_index(blocks)
+    starts, located = locate_starts(headers, blocks)
 
     ranges: list[tuple[int | None, int | None]] = []
     for i, entry in enumerate(headers):

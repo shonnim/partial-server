@@ -39,7 +39,14 @@ from app.services.header_extraction import (
     extract_headers,
     save_headers,
 )
-from app.services.headers import find_marker, load_content_list
+from app.services.header_oft import (
+    TOC_FIRST_PAGE,
+    TOC_LAST_PAGE,
+    locate_toc_oft,
+    page_index_ranges_oft,
+    parse_toc_oft,
+)
+from app.services.headers import find_marker, find_split_marker_text, load_content_list
 from app.storage import ObjectNotFound, read_object
 
 # The page range typed into the toolbar: 1-based page numbers, the way a PDF
@@ -125,6 +132,22 @@ GROUP_STRATEGIES: dict[str, GroupStrategy] = {
         locate=locate_toc,
         extract=parse_toc_bpa2,
         ranges=page_index_ranges_bpa2,
+    ),
+    # The TOC sits inside the first four pages — usually the third, whose
+    # letter-spaced 목 차 title parses as one block per syllable; the locate
+    # hook still finds it through the split-marker search. The TOC itself is
+    # one flat roman list, parsed by pattern rather than by model — the model
+    # used to return the split title syllables as headings — with a 요약
+    # entry put in front for the summary page the TOC never lists. The
+    # ranges hook runs the printed+offset arithmetic under the group's
+    # page-aligned layout: every header opens at the top of a page, so no
+    # page is shared between two sections. See app/services/header_oft.py.
+    "oft-1": GroupStrategy(
+        start_page=TOC_FIRST_PAGE,
+        end_page=TOC_LAST_PAGE,
+        locate=locate_toc_oft,
+        extract=parse_toc_oft,
+        ranges=page_index_ranges_oft,
     ),
 }
 
@@ -317,11 +340,17 @@ def run_pages(
 
     # A range that misses the contents page parses to body text, and body text
     # sent to the model would come back as invented headings, so it is refused
-    # here. A strategy with its own extract is exempt: its parser refuses
-    # non-TOC text by pattern, which is stricter than a marker word — and the
-    # bpa series renders its marker as a running header that the pages-parse
-    # markdown drops, so the word is absent even on the right pages.
-    if (strategy is None or strategy.extract is None) and find_marker(markdown) is None:
+    # here. A letter-spaced 목 차 title parses as one heading line per
+    # syllable, which the split search still accepts. A strategy with its own
+    # extract is exempt: its parser refuses non-TOC text by pattern, which is
+    # stricter than a marker word — and the bpa series renders its marker as a
+    # running header that the pages-parse markdown drops, so the word is
+    # absent even on the right pages.
+    if (
+        (strategy is None or strategy.extract is None)
+        and find_marker(markdown) is None
+        and find_split_marker_text(markdown) is None
+    ):
         return failed(
             f"pages {start}–{end} parsed, but no contents marker was in them; "
             "check the page range",

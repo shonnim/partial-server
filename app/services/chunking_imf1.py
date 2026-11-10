@@ -437,9 +437,11 @@ class ImfHierarchicalChunker:
                 for header in _ancestry(headers, row.header_id):
                     level = detect_level(header.header, self.LEVEL_PATTERNS)
                     if level is None:
-                        # The outline's own depth is the next best guide.
+                        # The outline's own depth is the next best guide. A
+                        # strategy with no marker patterns at all reads every
+                        # level this way by design, so nothing is warned.
                         level = min(max(header.level, 1), 3)
-                        if header.id not in warned_headers:
+                        if self.LEVEL_PATTERNS and header.id not in warned_headers:
                             warned_headers.add(header.id)
                             result.warnings.append(
                                 f"header {header.id} '{header.header}' matches no "

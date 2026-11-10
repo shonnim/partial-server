@@ -126,6 +126,78 @@ def find_marker(haystack: str) -> str | None:
     return None
 
 
+# The characters a split marker can be built from. A single-character block of
+# anything else (a page number, a bullet) is skipped rather than allowed to
+# break the join.
+_MARKER_CHARS = frozenset(
+    char
+    for marker in HEADER_MARKERS
+    for char in marker.casefold()
+    if not char.isspace()
+)
+
+
+def find_split_marker(blocks: Any) -> tuple[str, int | None] | None:
+    """A contents marker spelled across single-character blocks of one page.
+
+    A contents title set large and letter-spaced ("목   차") sometimes parses
+    into one block per syllable, with a running header interleaved between the
+    two by reading order — so neither any single block nor the re-dumped JSON
+    carries the marker as one contiguous string. Per page, the
+    single-character texts made of marker letters are joined in list order and
+    searched again; longer texts (the interloper) and unrelated characters
+    cannot get between the syllables because they are never joined.
+
+    Returns ``(marker, page_idx)``; the page is None when the deciding blocks
+    carry no usable ``page_idx``.
+    """
+    if not isinstance(blocks, list):
+        return None
+
+    letters: dict[int | None, list[str]] = {}
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        text = block.get("text")
+        if not isinstance(text, str):
+            continue
+        char = text.strip()
+        if len(char) != 1 or char.casefold() not in _MARKER_CHARS:
+            continue
+        page = block.get("page_idx")
+        if not isinstance(page, int) or isinstance(page, bool) or page < 0:
+            page = None
+        letters.setdefault(page, []).append(char)
+
+    for page, chars in letters.items():
+        marker = find_marker("".join(chars))
+        if marker is not None:
+            return marker, page
+    return None
+
+
+# What a parser wraps a markdown line in: heading hashes, emphasis, bullets,
+# blockquotes — stripped before a line can count as a single marker letter.
+_LINE_DRESSING = re.compile(r"^[\s#>*`\-–—]+|[\s#>*`]+$")
+
+
+def find_split_marker_text(text: str) -> str | None:
+    """A contents marker spelled across single-character lines of ``text``.
+
+    The markdown twin of ``find_split_marker``: the same letter-spaced title
+    renders in a pages-parse as one heading line per syllable ("# 목", "# 차")
+    with the running header's line between them. Single-character lines made
+    of marker letters are joined in order and searched again.
+    """
+    chars = [
+        line
+        for raw in text.splitlines()
+        if len(line := _LINE_DRESSING.sub("", raw)) == 1
+        and line.casefold() in _MARKER_CHARS
+    ]
+    return find_marker("".join(chars))
+
+
 def load_content_list(db: Session, document: Document) -> tuple[Any, str | None]:
     """A document's latest content list, decoded, or why there is none.
 
@@ -158,26 +230,13 @@ def load_content_list(db: Session, document: Document) -> tuple[Any, str | None]
         return None, f"content list is not valid JSON: {exc.msg} (line {exc.lineno})"
 
 
-def _read_content_list(db: Session, document: Document) -> tuple[str | None, str | None]:
-    """A document's latest content list as searchable text, or why there is none.
-
-    The JSON is parsed and re-serialised rather than searched as it arrived: a
-    writer that escaped non-ASCII would leave the Korean markers on disk as
-    escape sequences, which no literal search would ever match. Re-dumping with
-    ensure_ascii off normalises both spellings to the same characters.
-    """
-    parsed, error = load_content_list(db, document)
-    if error is not None:
-        return None, error
-    return json.dumps(parsed, ensure_ascii=False), None
-
-
 def contents_page_index(blocks: Any) -> int | None:
     """The ``page_idx`` of the first block that carries a contents marker.
 
     Blocks are searched the same way the has_header check searches the whole
-    list — as re-dumped JSON — so a document that was decided YES always
-    yields a page here, unless the block that decided it has no page index.
+    list — as re-dumped JSON, then for a marker split across single-character
+    blocks — so a document that was decided YES always yields a page here,
+    unless the block that decided it has no page index.
     """
     if not isinstance(blocks, list):
         return None
@@ -190,6 +249,10 @@ def contents_page_index(blocks: Any) -> int | None:
         page = block.get("page_idx")
         if isinstance(page, int) and not isinstance(page, bool) and page >= 0:
             return page
+
+    split = find_split_marker(blocks)
+    if split is not None:
+        return split[1]
     return None
 
 
@@ -253,8 +316,8 @@ def check_has_header(db: Session, doc_ids: Sequence[uuid.UUID]) -> CheckReport:
             )
             continue
 
-        content, error = _read_content_list(db, document)
-        if content is None:
+        blocks, error = load_content_list(db, document)
+        if error is not None:
             checks.append(
                 DocumentCheck(
                     id=document.id,
@@ -266,7 +329,13 @@ def check_has_header(db: Session, doc_ids: Sequence[uuid.UUID]) -> CheckReport:
             )
             continue
 
-        marker = find_marker(content)
+        # The JSON is searched re-serialised rather than as it arrived: a
+        # writer that escaped non-ASCII would leave the Korean markers on disk
+        # as escape sequences no literal search would match. A title the parse
+        # split into one block per syllable is caught by the split search.
+        marker = find_marker(json.dumps(blocks, ensure_ascii=False))
+        if marker is None and (split := find_split_marker(blocks)) is not None:
+            marker = split[0]
         document.has_header = HasHeader.YES if marker else HasHeader.NO
         checks.append(
             DocumentCheck(
