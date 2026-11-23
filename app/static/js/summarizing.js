@@ -93,6 +93,8 @@
     const force = card.dataset.force === "1";
     const general = card.dataset.general === "1";
     const llm = card.dataset.llm || "";
+    const workers = card.dataset.workers || "";
+    const group = card.dataset.group || "";
 
     // The run's clock, ticking beside the state so slow models are visible.
     const elapsedEl = strip.querySelector("[data-run-elapsed]");
@@ -141,7 +143,12 @@
           source: row,
           target: cell,
           swap: "innerHTML",
-          values: { ...(force ? { force: "1" } : {}), ...(llm ? { llm } : {}) },
+          values: {
+            ...(force ? { force: "1" } : {}),
+            ...(llm ? { llm } : {}),
+            ...(workers ? { workers } : {}),
+            ...(group ? { group } : {}),
+          },
         });
       } catch (err) {
         /* read the cell below either way */

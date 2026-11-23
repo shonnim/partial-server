@@ -1,0 +1,100 @@
+{#
+  The outcome of a Check or a Fix click, document by document. fixing.js
+  reads data-doc-ids — the documents whose PDF was rewritten — to disable
+  their rows in the tree, and data-fixed to drop the selection after a fix
+  with no failures. A check result carries neither, so the ticks survive it
+  and the same selection can be fixed next.
+
+  Errors come back as this card too: the caller is a button on the page, and
+  a 4xx would leave the panel blank.
+#}
+{% if error %}
+  <div class="card check-result is-error">{{ error }}</div>
+{% elif mode == "check" %}
+  <div class="card check-result">
+    <div class="check-summary">
+      <span class="pill ok">🔍 {{ check.checks|length }} checked</span>
+      <span class="pill total">✂ {{ check.with_spreads }} with spreads</span>
+      {% if check.failed %}<span class="pill fail">✗ {{ check.failed }} unreadable</span>{% endif %}
+    </div>
+    <ul class="migrate-list">
+      {% for c in check.checks %}
+        <li class="migrate-item {{ 'is-error' if not c.ok }}">
+          <span class="tree-name" title="{{ c.filename }}">{{ c.filename }}</span>
+          {% if not c.ok %}
+            <span class="pill fail" title="{{ c.error }}">✗ {{ c.error }}</span>
+          {% elif c.analysis.needs_fix %}
+            <span class="pill fixed">✂ {{ c.analysis.spreads }} of {{ c.analysis.sheets }} sheets two-up</span>
+            <span class="pill total">{{ c.analysis.sheets }} → {{ c.analysis.result_pages }} p</span>
+          {% elif c.analysis.minority_landscape %}
+            <span class="pill total" title="A few landscape sheets in a portrait document are wide tables, not spreads — Fix will skip this document">
+              − {{ c.analysis.spreads }} of {{ c.analysis.sheets }} landscape — not two-up</span>
+          {% else %}
+            <span class="pill ok">✓ one page per sheet</span>
+            <span class="pill total">{{ c.analysis.sheets }} p</span>
+          {% endif %}
+          {% if c.fixed %}<span class="pill fixed">already fixed</span>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+    {% if not check.checks %}
+      <p class="check-note">Nothing matched the selection any more. Reload the page.</p>
+    {% endif %}
+  </div>
+{% elif mode == "pages" %}
+  {#- data-page-updates carries "id:pages" pairs for the corrected rows, so
+      fixing.js can repaint their page pills in the tree without a reload. -#}
+  <div class="card check-result"
+       data-page-updates="{% for c in pages.corrections %}{{ c.doc_id }}:{{ c.real_pages }}{% if not loop.last %},{% endif %}{% endfor %}">
+    <div class="check-summary">
+      <span class="pill ok">📑 {{ pages.checks|length }} checked</span>
+      {% if pages.corrected %}<span class="pill fixed">↻ {{ pages.corrected }} corrected</span>{% endif %}
+      {% if pages.failed %}<span class="pill fail">✗ {{ pages.failed }} unreadable</span>{% endif %}
+    </div>
+    <ul class="migrate-list">
+      {% for c in pages.checks %}
+        <li class="migrate-item {{ 'is-error' if not c.ok }}">
+          <span class="tree-name" title="{{ c.filename }}">{{ c.filename }}</span>
+          {% if not c.ok %}
+            <span class="pill fail" title="{{ c.error }}">✗ {{ c.error }}</span>
+          {% elif c.corrected %}
+            <span class="pill fixed" title="The stored page count disagreed with the PDF and has been corrected">
+              ↻ {{ c.db_pages if c.db_pages is not none else '—' }} → {{ c.real_pages }} p</span>
+          {% else %}
+            <span class="pill ok">✓ {{ c.real_pages }} p</span>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+    {% if not pages.checks %}
+      <p class="check-note">Nothing matched the selection any more. Reload the page.</p>
+    {% endif %}
+  </div>
+{% else %}
+  <div class="card check-result" {% if not fix.failed %}data-fixed{% endif %}
+       data-doc-ids="{{ fix.fixed_ids|join(',') }}">
+    <div class="check-summary">
+      <span class="pill ok">✓ {{ fix.succeeded }} fixed</span>
+      {% if fix.skipped %}<span class="pill total">− {{ fix.skipped }} skipped</span>{% endif %}
+      {% if fix.failed %}<span class="pill fail">✗ {{ fix.failed }} failed</span>{% endif %}
+    </div>
+    <ul class="migrate-list">
+      {% for f in fix.fixes %}
+        <li class="migrate-item {{ 'is-error' if not f.ok }}">
+          <span class="tree-name" title="{{ f.key or f.filename }}">{{ f.filename }}</span>
+          {% if not f.ok %}
+            <span class="pill fail" title="{{ f.error }}">✗ {{ f.error }}</span>
+          {% elif f.wrote %}
+            <span class="pill fixed">✂ {{ f.spreads }} spread{{ '' if f.spreads == 1 else 's' }} split</span>
+            <span class="pill total">{{ f.pages_before }} → {{ f.pages_after }} p</span>
+          {% else %}
+            <span class="pill total" title="{{ f.skipped }}">− skipped: {{ f.skipped }}</span>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+    {% if not fix.fixes %}
+      <p class="check-note">Nothing matched the selection any more. Reload the page.</p>
+    {% endif %}
+  </div>
+{% endif %}

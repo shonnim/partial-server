@@ -37,6 +37,12 @@ from app.storage import ObjectNotFound, read_object
 # different strings, so both spellings are listed.
 HEADER_MARKERS: tuple[str, ...] = ("목 차", "목차", "차 례", "차례", "contents")
 
+# Hangul syllables the OCR reads as a look-alike hanzi when the contents title
+# is set large — "차" has come back as "补". Applied before every marker
+# search. 补 is the simplified-Chinese form (Korean text uses 補), so the
+# rewrite cannot collide with real content in this corpus.
+_OCR_CONFUSABLES = str.maketrans({"补": "차"})
+
 # How many documents one click may check. The read is one RustFS round-trip per
 # document inside an HTTP request, so the selection is capped rather than left
 # to grow into a batch job.
@@ -119,7 +125,7 @@ def find_marker(haystack: str) -> str | None:
     Matching is case-insensitive, which only affects the Latin marker; the
     Korean ones are unaffected by case folding.
     """
-    folded = haystack.casefold()
+    folded = haystack.translate(_OCR_CONFUSABLES).casefold()
     for marker in HEADER_MARKERS:
         if marker.casefold() in folded:
             return marker
@@ -161,7 +167,7 @@ def find_split_marker(blocks: Any) -> tuple[str, int | None] | None:
         text = block.get("text")
         if not isinstance(text, str):
             continue
-        char = text.strip()
+        char = text.strip().translate(_OCR_CONFUSABLES)
         if len(char) != 1 or char.casefold() not in _MARKER_CHARS:
             continue
         page = block.get("page_idx")
@@ -192,7 +198,7 @@ def find_split_marker_text(text: str) -> str | None:
     chars = [
         line
         for raw in text.splitlines()
-        if len(line := _LINE_DRESSING.sub("", raw)) == 1
+        if len(line := _LINE_DRESSING.sub("", raw).translate(_OCR_CONFUSABLES)) == 1
         and line.casefold() in _MARKER_CHARS
     ]
     return find_marker("".join(chars))

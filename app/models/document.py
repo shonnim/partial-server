@@ -72,6 +72,15 @@ class Document(Base):
     migrated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # When the Fixing page rewrote this document's two-up PDF into one page
+    # per sheet. NULL means the PDF has never been rewritten.
+    fixed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Where the Fixing page copied the untouched source PDF before replacing
+    # the object at ``s3_key`` with the fixed one — copying it back undoes
+    # the fix. NULL until the first fix; never overwritten by a later one.
+    original_s3_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     stage: Mapped[DocumentStage] = mapped_column(
         Enum(DocumentStage, name="document_stage", native_enum=True),
         nullable=False,

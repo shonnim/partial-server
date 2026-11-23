@@ -42,6 +42,7 @@ from app.services.header_extraction import (
 from app.services.header_oft import (
     TOC_FIRST_PAGE,
     TOC_LAST_PAGE,
+    amend_toc_oft,
     locate_toc_oft,
     page_index_ranges_oft,
     parse_toc_oft,
@@ -82,9 +83,12 @@ class GroupStrategy:
     hooks: ``locate`` reads the TOC's own page range off the document's
     content list (1-based viewer pages; None falls back to the static range),
     ``extract`` takes the parsed pages' markdown — whole, not cut by
-    ``contents_section`` — and returns the ordered headings, and ``ranges``
-    replaces ``page_index_ranges`` with the group's own page arithmetic. A
-    strategy with its own ``extract`` also skips the contents-marker gate:
+    ``contents_section`` — and returns the ordered headings, ``amend``
+    adjusts those headings with the content list in hand (oft-1 inserts the
+    summary section its TOC never lists, but only for a document that prints
+    one), and ``ranges`` replaces ``page_index_ranges`` with the group's own
+    page arithmetic. A strategy with its own ``extract`` also skips the
+    contents-marker gate:
     its parser validates the pages far more strictly than a marker word, and
     this series renders the marker as a running header the pages-parse
     markdown drops. Any hook may be set alone; unset means the default step.
@@ -95,6 +99,9 @@ class GroupStrategy:
     llm: str | None = None
     locate: Callable[[Any], tuple[int, int] | None] | None = None
     extract: Callable[[str], list[ExtractedHeader]] | None = None
+    amend: (
+        Callable[[Sequence[ExtractedHeader], Any], list[ExtractedHeader]] | None
+    ) = None
     ranges: (
         Callable[[Sequence[ExtractedHeader], Any], list[tuple[int | None, int | None]]]
         | None
@@ -137,8 +144,9 @@ GROUP_STRATEGIES: dict[str, GroupStrategy] = {
     # letter-spaced 목 차 title parses as one block per syllable; the locate
     # hook still finds it through the split-marker search. The TOC itself is
     # one flat roman list, parsed by pattern rather than by model — the model
-    # used to return the split title syllables as headings — with a 요약
-    # entry put in front for the summary page the TOC never lists. The
+    # used to return the split title syllables as headings. The amend hook
+    # puts a 요약 entry in front for the summary page the TOC never lists —
+    # only when the content list shows the document prints one. The
     # ranges hook runs the printed+offset arithmetic under the group's
     # page-aligned layout: every header opens at the top of a page, so no
     # page is shared between two sections. See app/services/header_oft.py.
@@ -147,6 +155,7 @@ GROUP_STRATEGIES: dict[str, GroupStrategy] = {
         end_page=TOC_LAST_PAGE,
         locate=locate_toc_oft,
         extract=parse_toc_oft,
+        amend=amend_toc_oft,
         ranges=page_index_ranges_oft,
     ),
 }
@@ -370,6 +379,9 @@ def run_pages(
             str(exc), start_page=start, end_page=end, parse_seconds=parse_seconds
         )
     llm_seconds = time.monotonic() - began
+
+    if strategy is not None and strategy.amend is not None:
+        extracted = strategy.amend(extracted, blocks)
 
     ranges = (
         strategy.ranges(extracted, blocks)

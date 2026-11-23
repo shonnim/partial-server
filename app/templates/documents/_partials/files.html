@@ -9,6 +9,8 @@
 {% for file in level.files %}
   <li class="tree-node is-file" data-id="{{ file.id }}">
     <div class="tree-row">
+      <input type="checkbox" class="tree-check" data-kind="file"
+             value="{{ file.id }}" aria-label="Select {{ file.filename }}">
       <span class="tree-icon">📄</span>
       <span class="tree-name" title="{{ file.filename }}">{{ file.filename }}</span>
       <span class="tree-badges">
@@ -17,7 +19,7 @@
         <a class="btn tree-view btn-pdf" data-viewer
            href="{{ url_for('document_viewer', document_id=file.id) }}">PDF</a>
         <a class="btn tree-view btn-ai"
-           href="http://localhost:5173/#/doc-ai/{{ file.id }}"
+           href="http://localhost:5173/documents?service=report&documentType={{ (file.document_type or '')|urlencode }}&sourceDocumentId={{ (file.source_document_id or '')|urlencode }}&atchFileId={{ (file.atch_file_id or '')|urlencode }}&atchFileSeq={{ file.atch_file_seq if file.atch_file_seq is not none else '' }}"
            target="_blank" rel="noopener">✦ AI 분석</a>
       </span>
     </div>

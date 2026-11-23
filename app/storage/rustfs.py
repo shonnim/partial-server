@@ -64,7 +64,19 @@ def get_client() -> Any:
         region_name=settings.rustfs_region,
         # RustFS keys are path-style; virtual-host addressing would turn the
         # bucket into a subdomain that does not resolve.
-        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path"},
+            # The pooled keep-alive connections to RustFS are silently
+            # dropped on its side while the app sits idle; the first request
+            # sent on such a corpse hangs for ~30-60s before anything gives.
+            # Capping the wait and retrying lands the request on a fresh
+            # connection in seconds instead. RustFS is local, so a healthy
+            # call never comes near these limits.
+            connect_timeout=5,
+            read_timeout=10,
+            retries={"max_attempts": 3, "mode": "standard"},
+        ),
     )
 
 

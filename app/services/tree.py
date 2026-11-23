@@ -64,6 +64,10 @@ class FolderNode:
     # ids (게시물ID and 첨부파일ID). The Mapping page shows it per folder so a
     # half-mapped folder stands out.
     with_mapped: int = 0
+    # Documents beneath this folder whose PDF the Fixing page has already
+    # rewritten into one page per sheet. When it is every one of them, the
+    # Fixing page has nothing left to select there.
+    with_fixed: int = 0
 
     @property
     def all_stored(self) -> bool:
@@ -84,6 +88,10 @@ class FolderNode:
     @property
     def all_mapped(self) -> bool:
         return self.total > 0 and self.with_mapped == self.total
+
+    @property
+    def all_fixed(self) -> bool:
+        return self.total > 0 and self.with_fixed == self.total
 
 
 @dataclass(frozen=True)
@@ -121,6 +129,12 @@ class FileNode:
     # document has not been mapped yet.
     source_document_id: str | None = None
     atch_file_id: str | None = None
+    atch_file_seq: int | None = None
+    # The registered document type, which the AI 분석 link passes along.
+    document_type: str | None = None
+    # Whether the Fixing page has rewritten this document's PDF into one page
+    # per sheet. The Fixing tree disables the row once it has been.
+    fixed: bool = False
 
     @property
     def mapped(self) -> bool:
@@ -167,7 +181,7 @@ def child_folders(db: Session, path: str) -> list[FolderNode]:
     rows = db.execute(
         text(f"""
             WITH scoped AS (
-                SELECT status, group_id, migrated_at,
+                SELECT status, group_id, migrated_at, fixed_at,
                        (source_document_id IS NOT NULL
                         AND atch_file_id IS NOT NULL) AS mapped,
                        {_FOLDER_EXPR} AS folder,
@@ -199,7 +213,8 @@ def child_folders(db: Session, path: str) -> list[FolderNode]:
                    count(*) FILTER (WHERE group_id IS NOT NULL) AS with_group,
                    count(*) FILTER (WHERE chunked) AS with_chunks,
                    count(*) FILTER (WHERE migrated_at IS NOT NULL) AS with_migrated,
-                   count(*) FILTER (WHERE mapped) AS with_mapped
+                   count(*) FILTER (WHERE mapped) AS with_mapped,
+                   count(*) FILTER (WHERE fixed_at IS NOT NULL) AS with_fixed
             FROM scoped
             WHERE folder IS NOT NULL
               AND split_part(folder, '/', :child_depth) <> ''
@@ -222,6 +237,7 @@ def child_folders(db: Session, path: str) -> list[FolderNode]:
             with_chunks=r.with_chunks,
             with_migrated=r.with_migrated,
             with_mapped=r.with_mapped,
+            with_fixed=r.with_fixed,
         )
         for r in rows
     ]
@@ -250,8 +266,9 @@ def folder_files(
         text(f"""
             SELECT documents.id, documents.filename, documents.size_bytes,
                    documents.pages, documents.status, documents.has_header,
-                   documents.group_id, documents.migrated_at,
+                   documents.group_id, documents.migrated_at, documents.fixed_at,
                    documents.source_document_id, documents.atch_file_id,
+                   documents.atch_file_seq, documents.document_type,
                    (
                        SELECT count(*) FROM headers h WHERE h.doc_id = documents.id
                    ) AS header_count,
@@ -300,6 +317,9 @@ def folder_files(
             migrated=r.migrated_at is not None,
             source_document_id=r.source_document_id,
             atch_file_id=r.atch_file_id,
+            atch_file_seq=r.atch_file_seq,
+            document_type=r.document_type,
+            fixed=r.fixed_at is not None,
         )
         for r in rows
     ]

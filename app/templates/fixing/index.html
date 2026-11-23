@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}Fixing · partial-server{% endblock %}
+{% block heading %}✂️ Fixing{% endblock %}
+{% block subheading %}Some PDFs hold two pages per sheet. Tick files or folders, check which ones do, and rewrite them into one page per sheet before parsing.{% endblock %}
+
+{% block actions %}
+  <span id="tree-selection" class="toolbar-count">Nothing selected</span>
+{% endblock %}
+
+{% block content %}
+  <div class="parsing-layout">
+    <div class="parsing-main">
+      <div class="card tree-card">
+        <div class="tree-head">
+          <span class="tree-head-label">📚 Corpus</span>
+          <span class="tree-badges" id="tree-root-badges" data-total="{{ total }}">
+            {% if failed %}<span class="pill fail">✗ {{ "{:,}".format(failed) }}</span>{% endif %}
+            <span class="pill total">{{ "{:,}".format(total) }}</span>
+            <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
+          </span>
+        </div>
+
+        <ul class="tree tree-children" id="tree-root">
+          {% include "fixing/_partials/level.html" %}
+        </ul>
+      </div>
+    </div>
+
+    {#- The fix box sits beside the tree. Check reads the selected PDFs and
+        reports which ones hold spreads; Fix rewrites those into one page per
+        sheet and repoints each document at the fixed PDF. -#}
+    <aside class="side-panel">
+      <section class="card side-box" id="fix-box">
+        <div class="side-box-head">
+          <span class="side-box-title">✂️ Un-spread</span>
+        </div>
+        <p class="side-note">
+          In a document whose sheets are mostly landscape, each landscape
+          sheet is split into its left and right halves; portrait sheets — a
+          single cover page, say — pass through untouched. A portrait document
+          with a few landscape sheets holds wide tables, not spreads, and is
+          skipped whole.
+        </p>
+        <form id="check-form"
+              hx-post="{{ url_for('fixing_check') }}"
+              hx-vals="js:{selection: window.treeSelectionJSON()}"
+              hx-target="#fix-result"
+              hx-swap="innerHTML"
+              hx-indicator="#fix-spinner">
+          <div class="side-box-actions">
+            <button type="submit" class="btn" id="btn-check"
+                    data-label="🔍 Check selection">
+              🔍 Check selection
+            </button>
+          </div>
+        </form>
+        <form id="fix-form"
+              hx-post="{{ url_for('fixing_fix') }}"
+              hx-vals="js:{selection: window.treeSelectionJSON()}"
+              hx-target="#fix-result"
+              hx-swap="innerHTML"
+              hx-indicator="#fix-spinner"
+              hx-confirm="Replace the selected PDFs with their one-page-per-sheet rewrite? The previous PDFs are kept as _original.pdf copies.">
+          <div class="side-box-actions">
+            <button type="submit" class="btn btn-primary btn-fix" id="btn-fix"
+                    data-label="✂️ Fix selection">
+              ✂️ Fix selection
+            </button>
+            <span class="spinner" id="fix-spinner"></span>
+          </div>
+        </form>
+        <p class="side-note">
+          Applies to every ticked document, including everything under a ticked
+          folder · at most <strong>{{ "{:,}".format(max_batch) }}</strong> per click ·
+          the fixed PDF replaces the previous one under the same key, and the
+          previous PDF is kept beside it as <code>_original.pdf</code>, so a fix
+          can be undone · a document with no spreads is skipped, nothing is
+          duplicated.
+        </p>
+      </section>
+
+      {#- Pages check: counts each selected PDF's real pages and corrects the
+          document row when the stored count no longer matches the PDF. -#}
+      <section class="card side-box" id="pages-box">
+        <div class="side-box-head">
+          <span class="side-box-title">📑 Pages</span>
+        </div>
+        <p class="side-note">
+          Opens each selected PDF and counts its real pages. A document whose
+          stored page count disagrees with the PDF is corrected in the
+          database and in the tree — useful after a PDF was replaced outside
+          this tool.
+        </p>
+        <form id="pages-form"
+              hx-post="{{ url_for('fixing_pages') }}"
+              hx-vals="js:{selection: window.treeSelectionJSON()}"
+              hx-target="#fix-result"
+              hx-swap="innerHTML"
+              hx-indicator="#pages-spinner">
+          <div class="side-box-actions">
+            <button type="submit" class="btn" id="btn-pages"
+                    data-label="📑 Check pages">
+              📑 Check pages
+            </button>
+            <span class="spinner" id="pages-spinner"></span>
+          </div>
+        </form>
+      </section>
+
+      {#- Where the Check, Fix, and Pages buttons' replies land. Empty until a click. -#}
+      <div id="fix-result"></div>
+    </aside>
+  </div>
+
+  {#- The viewer pop-up, same as on the documents list. -#}
+  <div id="modal"></div>
+
+  <script src="{{ static_url('js/viewer-modal.js') }}" defer></script>
+  <script src="{{ static_url('js/tree.js') }}" defer></script>
+  <script src="{{ static_url('js/fixing.js') }}" defer></script>
+{% endblock %}

@@ -1,7 +1,7 @@
 import uuid
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -9,8 +9,11 @@ from app.db import get_db
 from app.models.document import Document
 from app.schemas.document import DocumentBulkIn, DocumentBulkOut
 from app.services.documents import (
+    MAX_EXPORT_BATCH,
     DuplicateIdsInBatch,
+    documents_by_ids,
     get_document,
+    selection_json,
     upsert_documents,
 )
 from app.services.parse_artifacts import (
@@ -21,7 +24,12 @@ from app.services.parse_artifacts import (
     resolve_artifact,
     resolve_image,
 )
-from app.services.tree import DEFAULT_FILE_PAGE, list_level, root_totals
+from app.services.tree import (
+    DEFAULT_FILE_PAGE,
+    list_level,
+    resolve_selection,
+    root_totals,
+)
 from app.storage import ObjectNotFound, open_object
 from app.templating import templates
 
@@ -79,6 +87,32 @@ def documents_nodes(
     )
 
     return templates.TemplateResponse(request, template, {"level": level})
+
+
+@router.post("/selection", response_class=HTMLResponse, name="documents_selection_json")
+def documents_selection_json(
+    request: Request,
+    selection: str = Form(""),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """The ticked documents as a JSON block: id, s3_key, filename, pages.
+
+    Errors render as the result block too — the caller is a button on the
+    page, and a 4xx would leave the block blank.
+    """
+    doc_ids, error = resolve_selection(db, selection, limit=MAX_EXPORT_BATCH)
+    if error:
+        return templates.TemplateResponse(
+            request, "documents/_partials/selection_json.html", {"error": error}
+        )
+
+    docs = documents_by_ids(db, doc_ids)
+
+    return templates.TemplateResponse(
+        request,
+        "documents/_partials/selection_json.html",
+        {"docs": docs, "json_text": selection_json(docs)},
+    )
 
 
 @router.get("/{document_id}/viewer", response_class=HTMLResponse, name="document_viewer")

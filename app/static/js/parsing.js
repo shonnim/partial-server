@@ -23,6 +23,68 @@
 
   const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
+  /** Whether the Force toggle is on: parsed documents are selectable again. */
+  window.parseForce = () => {
+    const box = document.getElementById("force-parse");
+    return Boolean(box && box.checked);
+  };
+
+  // ---- the Force toggle ------------------------------------------------------
+
+  // Ticking Force hands the opted-out rows back to the selection: every
+  // disabled box in the tree — documents already parsed with the VLM engine,
+  // and the folders that went with them — is enabled, remembering on the
+  // element the disabled state it returns to when the toggle is cleared.
+  // Rows that load or finish while the toggle is on are swept the same way,
+  // so no box stays disabled under Force.
+
+  /** Enable every disabled box in `scope`; returns the boxes released now. */
+  function releaseBoxes(scope) {
+    const released = [];
+    scope.querySelectorAll(".tree-check:disabled").forEach((box) => {
+      box.dataset.forceReleased = "1";
+      box.dataset.heldTitle = box.title;
+      box.disabled = false;
+      box.title = "";
+      released.push(box);
+    });
+    return released;
+  }
+
+  /** Put every released box back the way the tree had it. */
+  function restoreBoxes() {
+    const fileNodes = [];
+    document.querySelectorAll(".tree-check[data-force-released]").forEach((box) => {
+      box.disabled = true;
+      box.checked = false;
+      box.indeterminate = false;
+      box.title = box.dataset.heldTitle || "";
+      delete box.dataset.forceReleased;
+      delete box.dataset.heldTitle;
+      const node = box.closest(".tree-node");
+      if (node && node.classList.contains("is-file")) fileNodes.push(node);
+    });
+    return fileNodes;
+  }
+
+  document.addEventListener("change", (event) => {
+    if (event.target.id !== "force-parse") return;
+    const root = document.getElementById("tree-root");
+    if (!root || !window.refreshTreeCounts) return;
+
+    if (event.target.checked) {
+      releaseBoxes(root);
+      window.refreshTreeCounts();
+    } else {
+      // Folder states are re-derived per restored document rather than
+      // trusted from the stash: more documents may have finished parsing
+      // while the toggle was on, which can take a folder that was selectable
+      // before out of the selection now.
+      restoreBoxes().forEach((node) => window.refreshTreeCounts(node));
+      window.refreshTreeCounts();
+    }
+  });
+
   // ---- the Parse docs button ------------------------------------------------
 
   /** Disabled and spinning while a queue is live; back to itself after. */
@@ -70,10 +132,19 @@
 
     const box = row.querySelector(":scope > .tree-row > .tree-check");
     if (box) {
+      // The tick comes off either way — the document just finished, and
+      // leaving it ticked would feed it straight into the next batch. Under
+      // Force the row stays selectable; what it keeps is the disabled state
+      // to fall back to when the toggle is cleared.
       box.checked = false;
       box.indeterminate = false;
-      box.disabled = true;
-      box.title = "Already parsed with vlm-engine";
+      if (window.parseForce()) {
+        box.dataset.forceReleased = "1";
+        box.dataset.heldTitle = "Already parsed with vlm-engine";
+      } else {
+        box.disabled = true;
+        box.title = "Already parsed with vlm-engine";
+      }
     }
     if (window.refreshTreeCounts) window.refreshTreeCounts(row);
   }
@@ -344,6 +415,34 @@
 
   document.body.addEventListener("htmx:afterSwap", (event) => {
     const target = event.detail.target;
+
+    // A level that loads while Force is on arrives with its parsed rows
+    // disabled; sweep them into the selection like everything already on
+    // screen. tree.js's own handler has run first (it registered first) and
+    // passed a checked folder's tick down to the selectable rows — the rows
+    // released here take the same tick, so a folder checked under Force
+    // keeps meaning "everything beneath it".
+    if (window.parseForce()) {
+      const list = target.classList.contains("tree-children")
+        ? target
+        : target.closest(".tree-children");
+      if (list) {
+        releaseBoxes(list).forEach((box) => {
+          const node = box.closest(".tree-node");
+          const parent =
+            node && node.parentElement && node.parentElement.closest(".tree-node");
+          const parentBox =
+            parent && parent.querySelector(":scope > .tree-row > .tree-check");
+          if (parentBox && parentBox.checked && !parentBox.indeterminate) {
+            box.checked = true;
+          }
+        });
+        if (window.refreshTreeCounts) {
+          window.refreshTreeCounts(list.closest(".tree-node"));
+        }
+        return;
+      }
+    }
 
     if (target.id === "parse-result") {
       const card = target.querySelector('[data-run="parse"]');

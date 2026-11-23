@@ -2,15 +2,32 @@
 
 {% block title %}Documents · partial-server{% endblock %}
 {% block heading %}📄 Documents{% endblock %}
-{% block subheading %}Every registered source PDF, browsed by folder.{% endblock %}
+{% block subheading %}Every registered source PDF, browsed by folder. Tick files or folders and Get JSON lists the selection.{% endblock %}
+
+{% block actions %}
+  <span id="tree-selection" class="toolbar-count">Nothing selected</span>
+  <form id="json-form"
+        hx-post="{{ url_for('documents_selection_json') }}"
+        hx-vals="js:{selection: window.treeSelectionJSON()}"
+        hx-target="#json-result"
+        hx-swap="innerHTML"
+        hx-indicator="#json-spinner">
+    <button type="submit" class="btn btn-primary">🧾 Get JSON</button>
+    <span class="spinner" id="json-spinner"></span>
+  </form>
+{% endblock %}
 
 {% block content %}
+  {#- The Get JSON button's reply lands here, above the tree. Empty until a click. -#}
+  <div id="json-result"></div>
+
   <div class="card tree-card">
     <div class="tree-head">
       <span class="tree-head-label">📚 Corpus</span>
       <span class="tree-badges" id="tree-root-badges" data-total="{{ total }}">
         {% if failed %}<span class="pill fail">✗ {{ "{:,}".format(failed) }}</span>{% endif %}
         <span class="pill total">{{ "{:,}".format(total) }}</span>
+        <span class="pill ok tree-picked" hidden>✓ <span class="tree-picked-n">0</span></span>
       </span>
     </div>
 
@@ -24,4 +41,29 @@
 
   <script src="{{ static_url('js/viewer-modal.js') }}" defer></script>
   <script src="{{ static_url('js/tree.js') }}" defer></script>
+  <script>
+    // The ⧉ button on the JSON block copies it to the clipboard. The clipboard
+    // API needs a secure context, so plain-http use over the LAN falls back to
+    // a selection copy.
+    document.addEventListener("click", async (event) => {
+      const btn = event.target.closest(".btn-copy-json");
+      if (!btn) return;
+      const text = document.getElementById("json-text").textContent;
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+      const original = btn.textContent;
+      btn.textContent = "✓ copied";
+      setTimeout(() => { btn.textContent = original; }, 900);
+    });
+  </script>
 {% endblock %}

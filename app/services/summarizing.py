@@ -20,16 +20,34 @@ One call to the text model per header. When a unit does not fit the input
 budget, it is split into parts at block boundaries, each part is summarised
 on its own, and the final summary is made from the part summaries.
 
+The page's workers picker sets how many of those calls run at once against
+the local model: 1 (the default) asks one by one, 4 or 8 keep that many
+requests in flight — within one level at a time, since level 1 reads level
+2's results. Only the model calls run on worker threads; every read of the
+outline and every write of a conclusion stays on the request's thread,
+because the Session is not thread-safe. Solar is an external API and always
+runs one by one.
+
 A header that already carries a conclusion is skipped unless the run is
 forced, so an interrupted run picks up where it left off; each conclusion is
 committed as soon as the model answers, for the same reason. One header's
 failure is counted and the document's other headers still run.
+
+The page's group picker changes where the *general* summary comes from.
+Default is the model call described above. A group with an entry in
+``GROUP_SUMMARIES`` has its own source — oft-1's reports open with a printed
+요약 section, and its text **is** the general summary, taken verbatim with no
+model call. In group mode only documents carrying that group id are queued,
+and the header conclusions are still written the default way.
 """
 
 import logging
+import re
+import threading
 import time
 import uuid
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
 from sqlalchemy import select, text
@@ -39,6 +57,7 @@ from app.config import get_settings
 from app.llm import LLMError, TokenUsage, chat_text_usage
 from app.models.document import Document
 from app.models.header import Header, HeaderContent
+from app.services.header_oft import SUMMARY_TITLE as OFT_SUMMARY_TITLE
 from app.services.html_table import (
     TableParseError,
     body_rows,
@@ -132,6 +151,94 @@ DEFAULT_LLM = "gemma"
 def resolve_llm(llm: str | None) -> str:
     """The picker's value, or the default for anything it does not offer."""
     return llm if llm in SUMMARY_LLMS else DEFAULT_LLM
+
+
+# How many model calls a run keeps in flight at once. 1 asks one by one; the
+# parallel options exist for the local vLLM server, which batches concurrent
+# requests instead of queueing them.
+WORKER_OPTIONS: tuple[int, ...] = (1, 4, 8)
+DEFAULT_WORKERS = 1
+
+
+def resolve_workers(workers: int | None, llm: str | None = None) -> int:
+    """The picker's worker count, honored for the local model only.
+
+    Anything the picker does not offer means the default. Solar is an
+    external, rate-limited API, so its calls stay one by one whatever the
+    picker says.
+    """
+    if resolve_llm(llm) != DEFAULT_LLM:
+        return DEFAULT_WORKERS
+    return workers if workers in WORKER_OPTIONS else DEFAULT_WORKERS
+
+
+# ---- group modes: where the general summary comes from ---------------------------
+
+_SQUEEZE = re.compile(r"\s+")
+
+
+def _squeeze(text: str) -> str:
+    return _SQUEEZE.sub("", text)
+
+
+def _oft_doc_summary(
+    headers: Sequence[Header],
+    children: dict[int | None, list[Header]],
+    contents: dict[int | None, list[HeaderContent]],
+) -> str:
+    """The oft-1 general summary: the 요약 section's own text, verbatim.
+
+    The group's reports open with a printed general summary (the 요 약 page
+    right after the TOC), which beats any model condensation of the body, so
+    its content rows are joined and stored as they stand — no model call.
+    The heading's own text row and the single-character syllables a split
+    title leaves behind are dropped on the way.
+    """
+    summary_header = next(
+        (h for h in headers if _squeeze(h.header) == OFT_SUMMARY_TITLE), None
+    )
+    if summary_header is None:
+        raise LLMError("no 요약 header stored — extract the headers first")
+
+    title = _squeeze(summary_header.header)
+    blocks = [
+        b
+        for b in subtree_blocks(summary_header, children, contents)
+        if len(_squeeze(b)) > 1 and _squeeze(b) != title
+    ]
+    if not blocks:
+        raise LLMError("the 요약 header has no content rows — run Section first")
+    return "\n\n".join(blocks)
+
+
+@dataclass(frozen=True)
+class GroupSummary:
+    """One group's way of writing the general summary."""
+
+    #: What the page's picker shows beside the group id.
+    label: str
+    #: The summary text from the stored outline; raises LLMError when the
+    #: document does not hold what the group promises. Never calls a model.
+    build: Callable[
+        [
+            Sequence[Header],
+            dict[int | None, list[Header]],
+            dict[int | None, list[HeaderContent]],
+        ],
+        str,
+    ]
+
+
+# The group modes the page offers next to "default". A group belongs here
+# only when its documents carry their own general summary on the page.
+GROUP_SUMMARIES: dict[str, GroupSummary] = {
+    "oft-1": GroupSummary(label="요약 page is the summary", build=_oft_doc_summary),
+}
+
+
+def resolve_group(group: str | None) -> str | None:
+    """The picker's group mode; anything without a strategy means default."""
+    return group if group in GROUP_SUMMARIES else None
 
 
 def _chat(system: str, user: str) -> tuple[str, TokenUsage]:
@@ -232,12 +339,15 @@ class Summarizer:
         self.count_tokens = count_tokens
         self.prompt_tokens = 0
         self.completion_tokens = 0
+        # A parallel run calls _ask from several worker threads at once.
+        self._tally_lock = threading.Lock()
 
     def _ask(self, system: str, user: str) -> str:
         """One model call, its usage added to the tally."""
         text, usage = self.complete(system, user)
-        self.prompt_tokens += usage.prompt_tokens
-        self.completion_tokens += usage.completion_tokens
+        with self._tally_lock:
+            self.prompt_tokens += usage.prompt_tokens
+            self.completion_tokens += usage.completion_tokens
         return text.strip()
 
     def summarize_unit(self, title: str, blocks: Sequence[str]) -> UnitSummary:
@@ -376,15 +486,21 @@ def _child_summaries(
     ]
 
 
-def _header_summary(
+def _summary_plan(
     header: Header,
     children: dict[int | None, list[Header]],
     contents: dict[int | None, list[HeaderContent]],
     summarizer: Summarizer,
     *,
     strict: bool = False,
-) -> tuple[str, int]:
-    """One header's summary text and the model calls it took.
+) -> Callable[[], tuple[str, int]]:
+    """One header's summary as a call still to be made.
+
+    The inputs — titles, child conclusions, content blocks — are gathered
+    here, on the caller's thread, because they are ORM reads and may lazy-load
+    through the Session; what comes back is a closure over plain strings that
+    only talks to the model, safe to hand to a worker thread. Raises here,
+    before any model call, for a header with nothing to summarise from.
 
     A level-2 header is summarised from the content rows of its subtree; a
     level-1 header from its level-2 children's stored conclusions. A level-1
@@ -392,10 +508,11 @@ def _header_summary(
     rows in the batch run — ``strict``, the pop-up box's mode, refuses
     instead: each box's button promises its level's own source.
     """
+    title = header.header.strip()
     if header.level == 1:
         summarised = _child_summaries(header, children)
         if summarised:
-            return summarizer.summarize_parent(header.header.strip(), summarised), 1
+            return lambda: (summarizer.summarize_parent(title, summarised), 1)
         if strict:
             raise LLMError(
                 "no summarized level-2 headers under this one — summarize them first"
@@ -404,8 +521,24 @@ def _header_summary(
     blocks = subtree_blocks(header, children, contents)
     if not blocks:
         raise LLMError("no content rows under this header")
-    unit = summarizer.summarize_unit(header.header.strip(), blocks)
-    return unit.text, unit.calls
+
+    def run() -> tuple[str, int]:
+        unit = summarizer.summarize_unit(title, blocks)
+        return unit.text, unit.calls
+
+    return run
+
+
+def _header_summary(
+    header: Header,
+    children: dict[int | None, list[Header]],
+    contents: dict[int | None, list[HeaderContent]],
+    summarizer: Summarizer,
+    *,
+    strict: bool = False,
+) -> tuple[str, int]:
+    """One header's summary text and the model calls it took — plan and run."""
+    return _summary_plan(header, children, contents, summarizer, strict=strict)()
 
 
 def summarize_document(
@@ -414,13 +547,22 @@ def summarize_document(
     *,
     force: bool = False,
     summarizer: Summarizer | None = None,
+    workers: int = DEFAULT_WORKERS,
+    group: str | None = None,
 ) -> SummarizeResult:
     """Write a conclusion for every level-2 then level-1 header of ``doc``,
-    then the document's general summary into ``documents.summary``.
+    then the document's general summary into ``documents.summary``. ``group``
+    is the page's group mode: with a ``GROUP_SUMMARIES`` entry, the general
+    summary comes from the group's own source instead of a model call; the
+    header conclusions are written the default way either way.
 
     Each conclusion is committed as soon as the model answers, so a failure
-    or a stop loses nothing already done. Returns what happened, never
-    raises: the caller is a queue row on the page.
+    or a stop loses nothing already done. ``workers`` is how many model calls
+    run at once — within one level at a time, level 2 before level 1, since
+    the parents read their children's results. The worker threads only make
+    model calls: the plans are gathered and every conclusion is written on
+    this thread, because the Session is not thread-safe. Returns what
+    happened, never raises: the caller is a queue row on the page.
     """
     summarizer = summarizer or Summarizer()
     result = SummarizeResult(id=doc.id, filename=doc.filename)
@@ -431,29 +573,83 @@ def summarize_document(
     level1 = [h for h in headers if h.level == 1]
     result.total = len(level1) + len(level2)
 
-    def write(header: Header, make: Callable[[], tuple[str, int]]) -> None:
-        if header.conclusion and not force:
-            result.skipped += 1
+    def store(header: Header, summary: str, calls: int) -> None:
+        header.conclusion = summary
+        db.commit()
+        result.summarized += 1
+        result.calls += calls
+
+    def fail(header: Header, exc: LLMError) -> None:
+        db.rollback()
+        result.failed += 1
+        result.errors.append(f"'{header.header.strip()}': {exc}")
+        logger.warning("summarizing header %s of %s failed: %s", header.id, doc.id, exc)
+
+    def process(batch: list[Header]) -> None:
+        """One level's headers: plan on this thread, call the model with
+        ``workers`` in flight, write each conclusion as its call answers."""
+        plans: list[tuple[Header, Callable[[], tuple[str, int]]]] = []
+        for header in batch:
+            if header.conclusion and not force:
+                result.skipped += 1
+                continue
+            try:
+                plans.append(
+                    (header, _summary_plan(header, children, contents, summarizer))
+                )
+            except LLMError as exc:
+                fail(header, exc)
+
+        if workers <= 1 or len(plans) <= 1:
+            for header, plan in plans:
+                try:
+                    summary, calls = plan()
+                except LLMError as exc:
+                    fail(header, exc)
+                else:
+                    store(header, summary, calls)
             return
-        try:
-            summary, calls = make()
-            header.conclusion = summary
-            db.commit()
-            result.summarized += 1
-            result.calls += calls
-        except LLMError as exc:
-            db.rollback()
-            result.failed += 1
-            result.errors.append(f"'{header.header.strip()}': {exc}")
-            logger.warning("summarizing header %s of %s failed: %s", header.id, doc.id, exc)
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(plan): header for header, plan in plans}
+            for future in as_completed(futures):
+                header = futures[future]
+                try:
+                    summary, calls = future.result()
+                except LLMError as exc:
+                    fail(header, exc)
+                else:
+                    store(header, summary, calls)
 
     # Level 2 first, so the level-1 headers read their children's summaries.
-    for header in [*level2, *level1]:
-        write(header, lambda h=header: _header_summary(h, children, contents, summarizer))
+    process(level2)
+    process(level1)
 
-    _write_doc_summary(db, doc, summarizer, level1, level2, result, force=force)
+    _write_doc_summary(
+        db,
+        doc,
+        summarizer,
+        level1,
+        level2,
+        result,
+        force=force,
+        build=_group_build(group, headers, children, contents),
+    )
 
     return _finish(result, level1, level2, started, summarizer)
+
+
+def _group_build(
+    group: str | None,
+    headers: Sequence[Header],
+    children: dict[int | None, list[Header]],
+    contents: dict[int | None, list[HeaderContent]],
+) -> Callable[[], str] | None:
+    """The group mode's general-summary call, or None for the default path."""
+    strategy = GROUP_SUMMARIES.get(group or "")
+    if strategy is None:
+        return None
+    return lambda: strategy.build(headers, children, contents)
 
 
 def summarize_document_general(
@@ -463,9 +659,11 @@ def summarize_document_general(
     force: bool = False,
     summarizer: Summarizer | None = None,
     strict: bool = False,
+    group: str | None = None,
 ) -> SummarizeResult:
     """Write only the general summary of ``doc``, from the header conclusions
-    already stored.
+    already stored — or from the group mode's own source (``GROUP_SUMMARIES``)
+    when ``group`` names one.
 
     The headers themselves are left untouched — this is the "General
     Summarize" path for a document whose header summaries exist but whose
@@ -477,13 +675,21 @@ def summarize_document_general(
     result = SummarizeResult(id=doc.id, filename=doc.filename)
     started = time.monotonic()
 
-    headers, _children, _contents = _load_outline(db, doc.id)
+    headers, children, contents = _load_outline(db, doc.id)
     level2 = [h for h in headers if h.level == 2]
     level1 = [h for h in headers if h.level == 1]
     result.total = len(level1) + len(level2)
 
     _write_doc_summary(
-        db, doc, summarizer, level1, level2, result, force=force, strict=strict
+        db,
+        doc,
+        summarizer,
+        level1,
+        level2,
+        result,
+        force=force,
+        strict=strict,
+        build=_group_build(group, headers, children, contents),
     )
 
     return _finish(result, level1, level2, started, summarizer)
@@ -548,16 +754,31 @@ def _write_doc_summary(
     *,
     force: bool,
     strict: bool = False,
+    build: Callable[[], str] | None = None,
 ) -> None:
     """The general summary of the whole document, from the level-1 summaries —
     or, outside ``strict``, the level-2 ones when no level-1 summary exists.
 
     ``strict`` is the pop-up's document box: its button promises the level-1
     summaries as the source, so missing ones are an error, not a fallback.
-    A summary already present is kept unless forced.
+    ``build`` is a group mode's own source (the oft-1 요약 page) and replaces
+    the model call outright. A summary already present is kept unless forced.
     """
     result.has_summary = bool(doc.summary and doc.summary.strip())
     if result.has_summary and not force:
+        return
+
+    if build is not None:
+        try:
+            doc.summary = build()
+            db.commit()
+            result.doc_summarized = True
+            result.has_summary = True
+        except LLMError as exc:
+            db.rollback()
+            result.failed += 1
+            result.errors.append(f"document summary: {exc}")
+            logger.warning("document summary of %s failed: %s", doc.id, exc)
         return
 
     tops = [h for h in level1 if h.conclusion and h.conclusion.strip()]
@@ -713,8 +934,19 @@ def _empty_headers_reason(titles: Sequence[str]) -> str:
     return f"{opening} no content: {named} — run Section first"
 
 
+def _group_mismatch(doc: Document, group: str | None) -> QueueSkip | None:
+    """The skip a group-mode run gives a document of another group, or None."""
+    if group is None or doc.group_id == group:
+        return None
+    return QueueSkip(
+        doc.filename,
+        f"group_id mismatch (expected {group}, got {doc.group_id or 'none'})",
+    )
+
+
 def build_queue(
-    db: Session, doc_ids: Sequence[uuid.UUID], *, force: bool = False
+    db: Session, doc_ids: Sequence[uuid.UUID], *, force: bool = False,
+    group: str | None = None,
 ) -> SummarizeQueue:
     """Split a selection into documents worth queueing and ones to skip.
 
@@ -723,7 +955,8 @@ def build_queue(
     do unless the run is forced; both are reported with the reason rather
     than failing the click. A document one of whose headers has no content
     to summarise from is not queued either — the run could only fail on it —
-    and its skip is flagged as an alert naming the empty headers.
+    and its skip is flagged as an alert naming the empty headers. In group
+    mode (``group``), only documents carrying that group id are queued.
     """
     stats = file_stats(db, doc_ids)
     missing = headers_missing_content(db, doc_ids)
@@ -733,6 +966,9 @@ def build_queue(
         doc = db.get(Document, doc_id)
         if doc is None:
             skipped.append(QueueSkip(str(doc_id), "document not found"))
+            continue
+        if (mismatch := _group_mismatch(doc, group)) is not None:
+            skipped.append(mismatch)
             continue
         doc_stats = stats.get(doc.id)
         if doc_stats is None or not doc_stats.total:
@@ -758,13 +994,17 @@ def build_queue(
 
 
 def build_general_queue(
-    db: Session, doc_ids: Sequence[uuid.UUID], *, force: bool = False
+    db: Session, doc_ids: Sequence[uuid.UUID], *, force: bool = False,
+    group: str | None = None,
 ) -> SummarizeQueue:
     """The "General Summarize" split: only the document summary is written.
 
     A document qualifies when at least one header conclusion is stored to
     build it from; one without any is pointed at the full Summarize run
     instead. One whose summary is already written is skipped unless forced.
+    In group mode (``group``), only documents carrying that group id are
+    queued, and content rows — not conclusions — are what the group's source
+    needs, so they are what is required.
     """
     stats = file_stats(db, doc_ids)
     eligible: list[QueueCandidate] = []
@@ -774,13 +1014,22 @@ def build_general_queue(
         if doc is None:
             skipped.append(QueueSkip(str(doc_id), "document not found"))
             continue
+        if (mismatch := _group_mismatch(doc, group)) is not None:
+            skipped.append(mismatch)
+            continue
         doc_stats = stats.get(doc.id)
         if doc_stats is None or not doc_stats.total:
             skipped.append(
                 QueueSkip(doc.filename, "no level 1-2 headers stored (run Headers first)")
             )
             continue
-        if not doc_stats.done:
+        if group is not None:
+            if not doc_stats.with_contents:
+                skipped.append(
+                    QueueSkip(doc.filename, "no content rows stored (run Section first)")
+                )
+                continue
+        elif not doc_stats.done:
             skipped.append(
                 QueueSkip(doc.filename, "no header summaries yet (run Summarize instead)")
             )

@@ -23,17 +23,19 @@ A user's query about an opened document runs through these steps:
    states what the query needs; when it does not, the caller returns
    :data:`NOT_FOUND_MESSAGE` instead of an answer forced from the wrong
    passage.
-6. **Answer** — the query and the chunk's text go to the text model, under a
+6. **Answer** — the query and the chunk's text go to the model, under a
    system prompt chosen by the query's type.
 7. **Sources** — the ``header_contents`` rows the chunk was built from are
    shown to the model next to the answer, and it names the ones the answer
    actually drew from; each comes back with its page index, the page number
    printed on that page (read from the content list), its text and its bbox.
 
-Every step takes its model call (and the retrieval its search) as an
-injectable callable, the way the Summarizer does, so the logic runs in tests
-without a model. Failures raise — LLMError, EmbeddingError,
-VectorStoreError — and the router turns them into an error event.
+Every model call here goes to Solar (the Upstage chat model, ``SOLAR_MODEL``),
+not the self-hosted text model the rest of the panel uses. Every step takes
+its model call (and the retrieval its search) as an injectable callable, the
+way the Summarizer does, so the logic runs in tests without a model. Failures
+raise — LLMError, EmbeddingError, VectorStoreError — and the router turns
+them into an error event.
 """
 
 import logging
@@ -46,6 +48,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.llm import LLMError, chat_json, chat_text
 from app.models.chunk import Chunk
 from app.models.document import Document
@@ -53,6 +56,7 @@ from app.models.header import Header, HeaderContent
 from app.schemas.retrieval import TOP_K
 from app.services.headers import load_content_list
 from app.services.retrieval import search_chunks
+from app.services.sections import document_headers_in_order
 from app.services.summarizing import document_summaries
 
 logger = logging.getLogger(__name__)
@@ -64,6 +68,31 @@ QUERY_TYPES = ("question", "summary", "analysis", "unclear")
 
 # Answers run to a short analytical report; the ceiling only stops a runaway reply.
 MAX_ANSWER_TOKENS = 4096
+
+
+def _solar_json(**kwargs: Any) -> dict[str, Any]:
+    """``chat_json`` pointed at Solar — the model every Q&A step calls.
+
+    Solar chat lives on the Upstage API beside the embeddings, same key, the
+    way the Summarizer's ``_chat_solar`` reaches it."""
+    settings = get_settings()
+    return chat_json(
+        base_url=settings.solar_base_url,
+        api_key=settings.upstage_api_key,
+        model=settings.solar_model,
+        **kwargs,
+    )
+
+
+def _solar_text(**kwargs: Any) -> str:
+    """``chat_text`` pointed at Solar, same endpoint and key as ``_solar_json``."""
+    settings = get_settings()
+    return chat_text(
+        base_url=settings.solar_base_url,
+        api_key=settings.upstage_api_key,
+        model=settings.solar_model,
+        **kwargs,
+    )
 
 # ---- step 1: page validation ------------------------------------------------------
 
@@ -172,7 +201,7 @@ class Classification:
 
 
 def classify_query(
-    query: str, *, complete_json: Callable[..., dict[str, Any]] = chat_json
+    query: str, *, complete_json: Callable[..., dict[str, Any]] = _solar_json
 ) -> Classification:
     """One model call: the query's type, and the query rewritten for retrieval."""
     reply = complete_json(
@@ -232,7 +261,7 @@ def classify_summary_scope(
     query: str,
     outline: Sequence[tuple[int, int, str]],
     *,
-    complete_json: Callable[..., dict[str, Any]] = chat_json,
+    complete_json: Callable[..., dict[str, Any]] = _solar_json,
 ) -> SummaryScope:
     """One model call: whether the summary request targets the document or a section.
 
@@ -278,7 +307,7 @@ def find_stored_summary(
     document: Document,
     query: str,
     *,
-    complete_json: Callable[..., dict[str, Any]] = chat_json,
+    complete_json: Callable[..., dict[str, Any]] = _solar_json,
     load_headers: Callable[[Session, uuid.UUID], list[Header]] = document_summaries,
 ) -> StoredSummary | None:
     """The stored summary that answers a summary request, or None.
@@ -326,7 +355,7 @@ def generate_summary_answer(
     summary: str,
     *,
     section: str | None = None,
-    complete: Callable[..., str] = chat_text,
+    complete: Callable[..., str] = _solar_text,
 ) -> str:
     """The reply to a summary request, written from the stored summary."""
     heading = f"SECTION HEADING:\n{section}\n\n" if section else ""
@@ -354,12 +383,34 @@ def retrieve_chunk(
     row is gone (a re-chunk raced the question).
     """
     hits = search(query, doc_id=str(doc_id), limit=TOP_K)
+    logger.info(
+        "retrieval for %s: query=%r hits=%s",
+        doc_id,
+        query,
+        [(h.chunk_id, round(h.score, 4)) for h in hits],
+    )
     if not hits:
         return None
     best = hits[0]
-    return db.scalar(
+    chunk = db.scalar(
         select(Chunk).where(Chunk.id == best.chunk_id, Chunk.doc_id == doc_id)
     )
+    if chunk is None:
+        logger.warning(
+            "retrieval for %s: best hit chunk %s has no row — stale vectors, "
+            "re-embed the document",
+            doc_id,
+            best.chunk_id,
+        )
+        return None
+    logger.info(
+        "retrieval for %s: chunk %s (score %.4f) embedding text:\n%s",
+        doc_id,
+        chunk.id,
+        best.score,
+        chunk.emb_text or chunk.text,
+    )
+    return chunk
 
 
 # ---- step 5: chunk verification ----------------------------------------------------
@@ -385,7 +436,7 @@ def chunk_answers(
     query: str,
     chunk_text: str,
     *,
-    complete_json: Callable[..., dict[str, Any]] = chat_json,
+    complete_json: Callable[..., dict[str, Any]] = _solar_json,
 ) -> bool:
     """One model call: does the retrieved passage state what the query needs?"""
     reply = complete_json(
@@ -461,7 +512,7 @@ def generate_answer(
     chunk_text: str,
     query_type: str,
     *,
-    complete: Callable[..., str] = chat_text,
+    complete: Callable[..., str] = _solar_text,
 ) -> str:
     """The answer to ``query`` from ``chunk_text``, under the type's prompt."""
     system = ANSWER_SYSTEMS.get(query_type)
@@ -499,7 +550,7 @@ def pick_source_ids(
     answer: str,
     candidates: Sequence[tuple[int, str]],
     *,
-    complete_json: Callable[..., dict[str, Any]] = chat_json,
+    complete_json: Callable[..., dict[str, Any]] = _solar_json,
 ) -> list[int]:
     """The candidate ids the model names as the answer's sources, in its order.
 
@@ -559,20 +610,52 @@ class QASource:
     bbox: tuple[int | None, int | None, int | None, int | None]
 
 
+def locate_rows(
+    db: Session,
+    document: Document,
+    rows: Sequence[HeaderContent],
+    *,
+    load_blocks: Callable[[Session, Document], tuple[Any, str | None]] = load_content_list,
+) -> list[QASource]:
+    """``rows`` as located sources, in the given order.
+
+    A missing content list costs only the printed page numbers — the sources
+    still come back, with ``page`` None and the reason logged.
+    """
+    if not rows:
+        return []
+
+    blocks, error = load_blocks(db, document)
+    if error is not None:
+        logger.warning(
+            "no printed page numbers for the sources of %s: %s", document.id, error
+        )
+        blocks = None
+
+    return [
+        QASource(
+            page_idx=row.page_idx,
+            page=printed_page(blocks, row.page_idx),
+            text=row.content or "",
+            bbox=(row.bbox_0, row.bbox_1, row.bbox_2, row.bbox_3),
+        )
+        for row in rows
+    ]
+
+
 def identify_sources(
     db: Session,
     document: Document,
     *,
     answer: str,
     chunk: Chunk,
-    complete_json: Callable[..., dict[str, Any]] = chat_json,
+    complete_json: Callable[..., dict[str, Any]] = _solar_json,
     load_blocks: Callable[[Session, Document], tuple[Any, str | None]] = load_content_list,
 ) -> list[QASource]:
     """The ``header_contents`` rows behind ``answer``, located on their pages.
 
     The chunk's ``head_content_ids`` bound the candidates; the model picks
-    among them. A missing content list costs only the printed page numbers —
-    the sources still come back, with ``page`` None and the reason logged.
+    among them.
     """
     if not chunk.head_content_ids:
         return []
@@ -593,24 +676,169 @@ def identify_sources(
     if not picked:
         return []
 
-    blocks, error = load_blocks(db, document)
-    if error is not None:
-        logger.warning(
-            "no printed page numbers for the sources of %s: %s", document.id, error
-        )
-        blocks = None
-
     by_id = {row.id: row for row in rows}
-    return [
-        QASource(
-            page_idx=row.page_idx,
-            page=printed_page(blocks, row.page_idx),
-            text=row.content or "",
-            bbox=(row.bbox_0, row.bbox_1, row.bbox_2, row.bbox_3),
-        )
-        for cid in picked
-        if (row := by_id[cid])
-    ]
+    return locate_rows(
+        db, document, [by_id[cid] for cid in picked], load_blocks=load_blocks
+    )
+
+
+# ---- the header scan (test-only "headers" mode) -------------------------------------
+
+# One scan call carries at most this much block text. A header with more is
+# split into consecutive batches of whole blocks — a block is never cut.
+MAX_SCAN_CHARS = 12000
+
+# A block shorter than this is a heading, a label or a lone bullet — "■ (통화
+# 정책 가정)" — not a passage that states anything. The model is told not to
+# name such blocks as sources; this is the deterministic backstop.
+MIN_SOURCE_CHARS = 30
+
+
+def is_main_source(text: str) -> bool:
+    """Whether a block is substantial enough to stand as the answer's source."""
+    return len(text.strip()) >= MIN_SOURCE_CHARS
+
+SYSTEM_SCAN = """You are the answering engine of a question-answering service over one Korean fiscal or economic report.
+
+You are given a user's question about the report and one section of it: the section's heading and its content blocks, each opening with its id. Decide whether these blocks themselves state what the question needs, and answer when they do.
+
+- "found" is true only when the blocks state at least the core of what is asked; being on the same topic, or surrounding the likely answer, is not enough.
+- When found, write a well-developed answer in Korean from these blocks alone: open with the direct answer — the fact or figure itself — then develop it over several paragraphs with the blocks' supporting figures, conditions, reasons and surrounding context that bear on the question, and close with a sentence or two on what it means within the blocks' scope. Aim for a substantial answer of several paragraphs, while stopping short of a full report.
+- Format the answer as Markdown that reads large and clear: descriptive "##" headings for its parts, lists where they aid reading, and the key figures bolded with **...**. Write polite Korean prose ("~습니다"); quote figures, units and periods exactly as the blocks print them, nothing the blocks do not say. When the blocks state little, a shorter faithful answer beats a stretched one.
+- Also return in "source_ids" the ids of the blocks the answer actually draws on — only blocks a specific statement or figure of the answer is stated in, best match first. A block that is only a heading, a label or a few words states nothing on its own and is never a source: name the blocks that carry the answer's substance.
+- When not found, return "found": false, an empty "answer" and an empty "source_ids".
+
+Return ONLY the JSON object."""
+
+SCAN_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "found": {"type": "boolean"},
+        "answer": {"type": "string"},
+        "source_ids": {"type": "array", "items": {"type": "integer"}},
+    },
+    "required": ["found", "answer", "source_ids"],
+    "additionalProperties": False,
+}
+
+
+@dataclass(frozen=True)
+class ScanBatch:
+    """One scan call's worth of a header: its heading and whole content blocks."""
+
+    header_id: int
+    heading: str
+    rows: list[HeaderContent]
+
+
+@dataclass(frozen=True)
+class ScanAnswer:
+    """What a scan call found: the answer and the rows it was drawn from."""
+
+    answer: str
+    rows: list[HeaderContent]
+
+
+def scan_batches(
+    db: Session,
+    doc_id: uuid.UUID,
+    *,
+    load_headers: Callable[[Session, uuid.UUID], list[Header]] = document_headers_in_order,
+) -> list[ScanBatch]:
+    """Every header's content blocks, batched for the scan, in document order.
+
+    Front-matter blocks (``header_id`` NULL) belong to no section and are left
+    out; so are blocks without text. One header usually makes one batch; a
+    header over :data:`MAX_SCAN_CHARS` makes several, asked one by one.
+    """
+    headers = load_headers(db, doc_id)
+    if not headers:
+        return []
+
+    rows = db.scalars(
+        select(HeaderContent)
+        .where(HeaderContent.doc_id == doc_id, HeaderContent.header_id.is_not(None))
+        .order_by(HeaderContent.id)
+    ).all()
+    by_header: dict[int, list[HeaderContent]] = {}
+    for row in rows:
+        if row.content and row.content.strip():
+            by_header.setdefault(row.header_id, []).append(row)
+
+    batches: list[ScanBatch] = []
+    for header in headers:
+        current: list[HeaderContent] = []
+        size = 0
+        for row in by_header.get(header.id, []):
+            length = len(row.content or "")
+            if current and size + length > MAX_SCAN_CHARS:
+                batches.append(
+                    ScanBatch(header_id=header.id, heading=header.header, rows=current)
+                )
+                current, size = [], 0
+            current.append(row)
+            size += length
+        if current:
+            batches.append(
+                ScanBatch(header_id=header.id, heading=header.header, rows=current)
+            )
+    return batches
+
+
+def scan_batch_for_answer(
+    query: str,
+    batch: ScanBatch,
+    *,
+    complete_json: Callable[..., dict[str, Any]] = _solar_json,
+) -> ScanAnswer | None:
+    """One scan call: the answer this batch grounds, or None to try the next.
+
+    Source ids the batch does not contain are dropped, and so are repeats and
+    blocks too small to be a main source; a "found" reply without an answer
+    counts as not found.
+    """
+    listed = "\n\n".join(f"[id {row.id}]\n{row.content}" for row in batch.rows)
+    reply = complete_json(
+        system=SYSTEM_SCAN,
+        user=(
+            f"USER QUERY:\n{query}\n\n"
+            f"SECTION HEADING:\n{batch.heading}\n\n"
+            f"CONTENT BLOCKS:\n{listed}"
+        ),
+        schema=SCAN_SCHEMA,
+        schema_name="header_scan",
+        max_tokens=MAX_ANSWER_TOKENS,
+    )
+    found = reply.get("found")
+    if not isinstance(found, bool):
+        raise LLMError("the model's scan reply held no found boolean")
+
+    logger.info(
+        "scan %r: header %r (%d blocks, %d chars) -> %s",
+        query,
+        batch.heading,
+        len(batch.rows),
+        sum(len(row.content or "") for row in batch.rows),
+        "found" if found else "no answer",
+    )
+    if not found:
+        return None
+
+    answer = reply.get("answer")
+    answer = answer.strip() if isinstance(answer, str) else ""
+    if not answer:
+        return None
+
+    known = {row.id: row for row in batch.rows}
+    picked: list[HeaderContent] = []
+    seen: set[int] = set()
+    for value in reply.get("source_ids") or []:
+        if not (isinstance(value, int) and value in known and value not in seen):
+            continue
+        seen.add(value)
+        if is_main_source(known[value].content or ""):
+            picked.append(known[value])
+    return ScanAnswer(answer=answer, rows=picked)
 
 
 # ---- suggested questions ----------------------------------------------------------
@@ -648,7 +876,7 @@ def suggest_questions(
     db: Session,
     doc_id: uuid.UUID,
     *,
-    complete_json: Callable[..., dict[str, Any]] = chat_json,
+    complete_json: Callable[..., dict[str, Any]] = _solar_json,
 ) -> list[str]:
     """Up to :data:`SUGGESTED_COUNT` questions the document can answer.
 

@@ -41,13 +41,26 @@
         <div class="side-box-head">
           <span class="side-box-title">⚙️ Run</span>
         </div>
+
+        {#- Force: hands the rows already parsed with the VLM engine back to
+            the selection. The tree disables those boxes so a batch cannot
+            sweep up a finished document by accident; ticking this re-enables
+            them (and the folders above them), and the run takes them through
+            again — the new output replaces the old one in storage.
+            parsing.js owns the toggling and the restore. -#}
+        <label class="method-picker side-method force-picker" for="force-parse"
+               title="Include documents already parsed with the VLM engine — re-parsing replaces their stored output">
+          <input type="checkbox" id="force-parse">
+          <span>force parsing</span>
+        </label>
+
         <div class="side-box-actions">
           {#- Disabled and spinning for as long as the queue it starts is live;
               parsing.js owns that state. -#}
           <button type="button" class="btn btn-primary btn-parse" id="btn-parse"
                   data-label="⚙ Parse docs"
                   hx-post="{{ url_for('parsing_run') }}"
-                  hx-vals="js:{selection: window.treeSelectionJSON()}"
+                  hx-vals="js:{selection: window.treeSelectionJSON(), force: window.parseForce()}"
                   hx-target="#parse-result"
                   hx-swap="innerHTML"
                   hx-indicator="#parse-spinner">
@@ -57,7 +70,8 @@
         </div>
         <p class="side-note">
           Uploaded to <strong>{{ backend }}</strong> one after another, parsed in parallel ·
-          already parsed with it are skipped · at most <strong>{{ max_batch }}</strong> per click
+          already parsed with it are skipped unless <strong>force parsing</strong> is on ·
+          at most <strong>{{ max_batch }}</strong> per click
         </p>
       </section>
 

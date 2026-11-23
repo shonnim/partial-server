@@ -5,6 +5,7 @@ token counter the way the chunker takes its counter, so the split-and-merge
 behaviour and the prompt plumbing are exercised directly.
 """
 
+import threading
 import uuid
 
 import pytest
@@ -22,6 +23,7 @@ from app.services.summarizing import (
     _header_summary,
     block_text,
     subtree_blocks,
+    summarize_document,
 )
 
 
@@ -58,6 +60,18 @@ def test_make_summarizer_binds_the_picked_model() -> None:
     assert summarizing.make_summarizer("solar").complete is summarizing._chat_solar
     # An unknown value never picks a model by accident.
     assert summarizing.make_summarizer("anything").complete is summarizing._chat
+
+
+def test_resolve_workers_offers_1_4_and_8_for_the_local_model() -> None:
+    assert summarizing.resolve_workers(1) == 1
+    assert summarizing.resolve_workers(4) == 4
+    assert summarizing.resolve_workers(8, "gemma") == 8
+    # Anything the picker does not offer means the default.
+    assert summarizing.resolve_workers(2) == summarizing.DEFAULT_WORKERS
+    assert summarizing.resolve_workers(0) == summarizing.DEFAULT_WORKERS
+    assert summarizing.resolve_workers(None) == summarizing.DEFAULT_WORKERS
+    # Solar is an external API: one by one whatever the picker says.
+    assert summarizing.resolve_workers(8, "solar") == summarizing.DEFAULT_WORKERS
 
 
 def test_summarizer_tallies_the_usage_of_every_call() -> None:
@@ -356,3 +370,190 @@ def test_subtree_blocks_fold_in_descendants_under_their_headings() -> None:
         "가. 선진국",
         "하위 본문",
     ]
+
+
+# ---- the whole-document run and its workers ------------------------------------------
+
+
+class OutlineDb:
+    """Enough of a Session for ``summarize_document``: the two outline reads,
+    then per-conclusion commits. Nothing is expired on commit, so conclusions
+    written earlier in the run stay readable."""
+
+    def __init__(self, headers: list[Header], contents: list[HeaderContent]) -> None:
+        self._reads: list[list] = [headers, contents]
+        self.commits = 0
+
+    def scalars(self, stmt):
+        rows = self._reads.pop(0)
+
+        class Result:
+            def all(self) -> list:
+                return rows
+
+        return Result()
+
+    def commit(self) -> None:
+        self.commits += 1
+
+    def rollback(self) -> None:
+        pass
+
+
+def _outline() -> tuple[Document, list[Header], list[HeaderContent]]:
+    """One level-1 chapter with four level-2 sections, each with a text row."""
+    doc = Document(id=uuid.uuid4(), filename="보고서.pdf", summary=None)
+    parent = Header(id=1, header="I. 국제기구", level=1, parent_id=None)
+    sections = [
+        Header(id=i, header=f"{i - 1}. 절", level=2, parent_id=1) for i in range(2, 6)
+    ]
+    contents = [
+        HeaderContent(id=10 + i, header_id=h.id, type="text", content=f"본문 {h.id}")
+        for i, h in enumerate(sections)
+    ]
+    return doc, [parent, *sections], contents
+
+
+def test_document_run_writes_level2_then_level1_then_the_doc_summary() -> None:
+    doc, headers, contents = _outline()
+    model = FakeModel()
+
+    result = summarize_document(
+        OutlineDb(headers, contents), doc, summarizer=summarizer_of(model)
+    )
+
+    assert result.ok
+    assert result.summarized == 5 and result.failed == 0
+    assert result.doc_summarized and result.has_summary
+    assert result.calls == 6  # four sections, the chapter, the document
+    # Sections first, then the chapter from their conclusions, then the doc.
+    assert [system for system, _ in model.calls] == [
+        *[SYSTEM_SECTION] * 4,
+        SYSTEM_PARENT,
+        SYSTEM_DOCUMENT,
+    ]
+    assert all(h.conclusion for h in headers)
+    assert doc.summary
+
+
+def test_workers_run_a_level_of_model_calls_in_parallel() -> None:
+    # Four section calls under 4 workers: the barrier opens only when all
+    # four are in flight together, so a sequential run would break it (and
+    # fail the test) rather than pass one by one.
+    doc, headers, contents = _outline()
+    barrier = threading.Barrier(4, timeout=10)
+    lock = threading.Lock()
+    calls: list[str] = []
+
+    def model(system: str, user: str) -> tuple[str, TokenUsage]:
+        if system == SYSTEM_SECTION:
+            barrier.wait()
+        with lock:
+            calls.append(system)
+        return "요약", TokenUsage(prompt_tokens=100, completion_tokens=10)
+
+    result = summarize_document(
+        OutlineDb(headers, contents),
+        doc,
+        summarizer=Summarizer(complete=model, count_tokens=len),
+        workers=4,
+    )
+
+    assert result.ok and result.summarized == 5 and result.doc_summarized
+    # The parent still runs after every section: it reads their conclusions.
+    assert calls[-2:] == [SYSTEM_PARENT, SYSTEM_DOCUMENT]
+    assert all(h.conclusion == "요약" for h in headers)
+
+
+# ---- group mode: the general summary from the group's own source ---------------------
+
+
+def test_resolve_group_knows_only_registered_modes() -> None:
+    assert summarizing.resolve_group("oft-1") == "oft-1"
+    assert summarizing.resolve_group("") is None
+    assert summarizing.resolve_group(None) is None
+    assert summarizing.resolve_group("bpa-1") is None  # no summary strategy
+
+
+def _oft_outline() -> tuple[Document, list[Header], list[HeaderContent]]:
+    """An oft-1 document: the 요약 section and one country section."""
+    doc = Document(id=uuid.uuid4(), filename="재정동향.pdf", summary=None)
+    summary = Header(id=1, header="요 약", level=1, parent_id=None)
+    country = Header(id=2, header="I. 국제기구", level=1, parent_id=None)
+    contents = [
+        HeaderContent(id=10, header_id=1, type="text", content="요 약"),  # the heading row
+        HeaderContent(id=11, header_id=1, type="text", content="요"),  # split syllables
+        HeaderContent(id=12, header_id=1, type="text", content="○ 재정수지는 흑자"),
+        HeaderContent(id=13, header_id=1, type="text", content="∙ 세입이 증가"),
+        HeaderContent(id=14, header_id=2, type="text", content="국제기구 본문"),
+    ]
+    return doc, [summary, country], contents
+
+
+def test_oft_group_mode_takes_the_요약_page_as_the_general_summary() -> None:
+    doc, headers, contents = _oft_outline()
+    model = FakeModel()
+
+    result = summarize_document(
+        OutlineDb(headers, contents), doc, summarizer=summarizer_of(model), group="oft-1"
+    )
+
+    # The 요약 page's own text, verbatim: heading row and syllables dropped,
+    # no SYSTEM_DOCUMENT call spent on it.
+    assert doc.summary == "○ 재정수지는 흑자\n\n∙ 세입이 증가"
+    assert result.doc_summarized and result.has_summary
+    assert SYSTEM_DOCUMENT not in [system for system, _ in model.calls]
+    # The headers themselves are still summarised the default way.
+    assert result.summarized == 2
+    assert all(h.conclusion for h in headers)
+
+
+def test_oft_group_mode_without_a_요약_header_fails_the_doc_summary() -> None:
+    doc = Document(id=uuid.uuid4(), filename="재정동향.pdf", summary=None)
+    headers = [Header(id=2, header="I. 국제기구", level=1, parent_id=None)]
+    contents = [HeaderContent(id=14, header_id=2, type="text", content="본문")]
+    model = FakeModel()
+
+    result = summarize_document(
+        OutlineDb(headers, contents), doc, summarizer=summarizer_of(model), group="oft-1"
+    )
+
+    assert not result.doc_summarized
+    assert doc.summary is None
+    assert any("요약" in e for e in result.errors)
+
+
+def test_general_run_in_group_mode_needs_no_header_conclusions() -> None:
+    # The default general run reads conclusions; the group mode reads the
+    # 요약 rows, so a document with none summarised still gets its summary.
+    doc, headers, contents = _oft_outline()
+    model = FakeModel()
+
+    result = summarizing.summarize_document_general(
+        OutlineDb(headers, contents), doc, summarizer=summarizer_of(model), group="oft-1"
+    )
+
+    assert doc.summary == "○ 재정수지는 흑자\n\n∙ 세입이 증가"
+    assert result.doc_summarized
+    assert model.calls == []  # no model call at all
+
+
+def test_a_failed_header_does_not_stop_a_parallel_run() -> None:
+    doc, headers, contents = _outline()
+
+    def model(system: str, user: str) -> tuple[str, TokenUsage]:
+        if "본문 2" in user:
+            raise LLMError("the model did not answer")
+        return "요약", TokenUsage(prompt_tokens=100, completion_tokens=10)
+
+    result = summarize_document(
+        OutlineDb(headers, contents),
+        doc,
+        summarizer=Summarizer(complete=model, count_tokens=len),
+        workers=4,
+    )
+
+    assert not result.ok
+    assert result.failed == 1
+    assert result.summarized == 4  # three sections, the chapter
+    assert any("1. 절" in e for e in result.errors)

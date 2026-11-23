@@ -159,9 +159,15 @@ def parsing_health(request: Request) -> HTMLResponse:
 def parsing_run(
     request: Request,
     selection: str = Form(""),
+    force: bool = Form(False),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    """Turn the selection into a queue the browser walks one document at a time."""
+    """Turn the selection into a queue the browser walks one document at a time.
+
+    ``force`` is the page's Force parsing toggle: with it, documents already
+    parsed with the VLM engine are queued again instead of skipped, and the
+    finished run replaces their previous output in storage.
+    """
     doc_ids, error = resolve_selection(db, selection, limit=MAX_PARSE_BATCH)
     if error:
         return templates.TemplateResponse(
@@ -171,7 +177,7 @@ def parsing_run(
     return templates.TemplateResponse(
         request,
         "parsing/_partials/queue.html",
-        {"queue": build_queue(db, doc_ids), "poll_seconds": POLL_SECONDS},
+        {"queue": build_queue(db, doc_ids, force=force), "poll_seconds": POLL_SECONDS},
     )
 
 

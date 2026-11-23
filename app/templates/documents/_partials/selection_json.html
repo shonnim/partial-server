@@ -1,0 +1,17 @@
+{#
+  The Get JSON button's reply: the ticked documents as one JSON array of
+  {id, s3_key, filename, pages}, ready to copy. Errors come back as this
+  block too — the caller is a button on the page, and a 4xx would leave the
+  block blank.
+#}
+{% if error %}
+  <div class="card check-result is-error">{{ error }}</div>
+{% else %}
+  <div class="card json-export">
+    <div class="json-export-head">
+      <span class="pill ok">✓ {{ docs|length }} document{{ '' if docs|length == 1 else 's' }}</span>
+      <button type="button" class="btn btn-copy-json">⧉ Copy JSON</button>
+    </div>
+    <pre class="parsed-text is-json json-export-text" id="json-text" tabindex="0">{{ json_text }}</pre>
+  </div>
+{% endif %}

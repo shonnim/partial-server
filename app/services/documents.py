@@ -1,13 +1,21 @@
+import json
 import uuid
 from collections import Counter
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.models.document import Document
 from app.schemas.document import DocumentIn
+
+# Documents one Get JSON click may cover. The export is a metadata-only
+# SELECT, so it can take far more rows per click than the pipeline batches
+# that do real work per document.
+MAX_EXPORT_BATCH = 1000
 
 # Columns an upsert refreshes when the id already exists. `id` and `created_at`
 # are deliberately absent: identity and registration time never change.
@@ -93,3 +101,61 @@ def upsert_documents(db: Session, documents: list[DocumentIn]) -> int:
 
 def get_document(db: Session, document_id: uuid.UUID) -> Document | None:
     return db.get(Document, document_id)
+
+
+def find_by_source_ids(
+    db: Session,
+    *,
+    source_document_id: str,
+    atch_file_id: str,
+    atch_file_seq: int,
+) -> list[Document]:
+    """Documents carrying these source-system ids, at most two rows.
+
+    Two on purpose: the caller needs to tell "exactly one" from "more than
+    one" — an ambiguous mapping — without fetching every match.
+    """
+    return (
+        db.scalars(
+            select(Document)
+            .where(
+                Document.source_document_id == source_document_id,
+                Document.atch_file_id == atch_file_id,
+                Document.atch_file_seq == atch_file_seq,
+            )
+            .order_by(Document.id)
+            .limit(2)
+        )
+    ).all()
+
+
+def documents_by_ids(db: Session, doc_ids: Sequence[uuid.UUID]) -> list[Document]:
+    """The selected documents, in the tree's filename order."""
+    if not doc_ids:
+        return []
+
+    return list(
+        db.scalars(
+            select(Document)
+            .where(Document.id.in_(doc_ids))
+            .order_by(Document.filename, Document.id)
+        )
+    )
+
+
+def selection_json(docs: Sequence[Document]) -> str:
+    """The selection as the JSON block the Documents page shows.
+
+    ``ensure_ascii`` is off: filenames are frequently Korean, and \\u-escapes
+    would make the block unreadable for exactly the people copying it out.
+    """
+    rows = [
+        {
+            "id": str(doc.id),
+            "s3_key": doc.s3_key,
+            "filename": doc.filename,
+            "pages": doc.pages,
+        }
+        for doc in docs
+    ]
+    return json.dumps(rows, ensure_ascii=False, indent=2)

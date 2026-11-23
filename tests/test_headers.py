@@ -40,6 +40,21 @@ def test_split_marker_skips_a_non_marker_character_between_syllables() -> None:
     assert find_split_marker(blocks) == ("목차", 2)
 
 
+def test_split_marker_reads_through_an_ocr_confusable_syllable() -> None:
+    # The same split title, but the OCR read the large "차" as the look-alike
+    # hanzi "补" — seen in the wild on page 2 of a 재정동향 volume.
+    blocks = [
+        _block("목", 2),
+        _block("재정동향", 2),
+        _block("补", 2),
+    ]
+    assert find_split_marker(blocks) == ("목차", 2)
+    assert contents_page_index(blocks) == 2
+    # The confusable is also mapped in a whole-string search and in markdown.
+    assert find_marker("목 补") == "목 차"
+    assert find_split_marker_text("# 목\n\n재정동향\n\n# 补\n") == "목차"
+
+
 def test_split_marker_spells_차례_too() -> None:
     blocks = [_block("차", 1), _block("례", 1)]
     assert find_split_marker(blocks) == ("차례", 1)

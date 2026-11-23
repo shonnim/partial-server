@@ -13,6 +13,8 @@
     <div class="tree-row">
       <input type="checkbox" class="tree-check" data-kind="file"
              value="{{ file.id }}" aria-label="Select {{ file.filename }}">
+      {#- file_offset keeps the numbering continuous across "load more" batches. -#}
+      <span class="tree-order">{{ level.file_offset + loop.index }}</span>
       <span class="tree-icon">📄</span>
       <span class="tree-name" title="{{ file.filename }}">{{ file.filename }}</span>
       <span class="tree-badges">

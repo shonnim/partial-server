@@ -155,7 +155,21 @@ def needs_parse(backend: str | None) -> bool:
     return backend != BACKEND
 
 
-def build_queue(db: Session, doc_ids: Sequence[uuid.UUID]) -> ParseQueue:
+def skip_reason(backend: str | None, *, force: bool) -> str | None:
+    """Why the run leaves a document out; None when it goes in.
+
+    ``force`` is the page's Force parsing toggle: with it nothing is held
+    back — a document that already went through the VLM engine is parsed
+    again, and the finished run replaces its previous output in storage.
+    """
+    if force or needs_parse(backend):
+        return None
+    return f"already parsed with {BACKEND}"
+
+
+def build_queue(
+    db: Session, doc_ids: Sequence[uuid.UUID], *, force: bool = False
+) -> ParseQueue:
     """Decide, for each selected document, whether the run will take it."""
     if not doc_ids:
         return ParseQueue(candidates=())
@@ -169,7 +183,7 @@ def build_queue(db: Session, doc_ids: Sequence[uuid.UUID]) -> ParseQueue:
         latest = latest_parsed_doc(db, doc.id)
         backend = latest.backend if latest else None
         status = latest.status if latest else None
-        reason = None if needs_parse(backend) else f"already parsed with {BACKEND}"
+        reason = skip_reason(backend, force=force)
         candidates.append(
             ParseCandidate(
                 id=doc.id,

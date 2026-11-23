@@ -19,6 +19,7 @@ _SIZE_UNITS = ("B", "KB", "MB", "GB", "TB")
 NAV_ITEMS = (
     {"key": "dashboard", "label": "Dashboard", "icon": "📊", "url": "/"},
     {"key": "documents", "label": "Documents", "icon": "📄", "url": "/documents"},
+    {"key": "fixing", "label": "Fixing", "icon": "✂️", "url": "/fixing"},
     {"key": "parsing", "label": "Parsing", "icon": "⚙️", "url": "/parsing"},
     {"key": "headers", "label": "Headers", "icon": "🗂️", "url": "/headers"},
     {"key": "sections", "label": "Section", "icon": "📑", "url": "/sections"},

@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -9,6 +10,7 @@ from app.routers import (
     dashboard,
     documents,
     embedding,
+    fixing,
     grouping,
     headers,
     mapping,
@@ -19,6 +21,11 @@ from app.routers import (
     summarizing,
     transform,
 )
+
+# A root handler so app loggers print to the console uvicorn runs in. All
+# modules stay at the default WARNING — /ask in particular must not echo
+# queries or retrieved text to the terminal.
+logging.basicConfig(format="%(levelname)s %(name)s: %(message)s")
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -31,6 +38,7 @@ app.include_router(client.router)
 app.include_router(dashboard.router)
 app.include_router(documents.router)
 app.include_router(embedding.router)
+app.include_router(fixing.router)
 app.include_router(grouping.router)
 app.include_router(headers.router)
 app.include_router(mapping.router)

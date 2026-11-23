@@ -48,6 +48,27 @@
             {% endfor %}
           </select>
 
+          <label class="group-label" for="summarize-group"
+                 title="where the general summary comes from — default builds it from the header summaries with the model; a group mode takes the group's own source and queues only that group's documents">
+            Group mode
+          </label>
+          <select class="group-input" id="summarize-group" name="group">
+            <option value="">default</option>
+            {% for key, strategy in summary_groups.items() %}
+              <option value="{{ key }}">{{ key }} — {{ strategy.label }}</option>
+            {% endfor %}
+          </select>
+
+          <label class="group-label" for="summarize-workers"
+                 title="model calls kept in flight at once — local LLM only; Solar always runs one by one">
+            Workers (local LLM)
+          </label>
+          <select class="group-input" id="summarize-workers" name="workers">
+            {% for n in worker_options %}
+              <option value="{{ n }}">{{ n }}{{ ' — one by one' if n == 1 else ' — parallel' }}</option>
+            {% endfor %}
+          </select>
+
           <dl class="stat-grid chunk-stats">
             <div class="stat-cell" data-stat="selected"><dt>Selected documents</dt><dd id="summarize-selected">0</dd></div>
           </dl>

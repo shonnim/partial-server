@@ -753,6 +753,18 @@ dialog.modal::backdrop { background: rgba(30, 35, 66, .46); backdrop-filter: blu
 .tree-check:disabled { cursor: default; opacity: .4; }
 .tree-row:has(> .tree-check:disabled) .tree-name { color: var(--ink-soft); }
 
+/* Order number on a file row: the document's position within its folder's
+   filename ordering. Faint and fixed-width so a column of them reads as a
+   quiet gutter, not as data competing with the filename. */
+.tree-order {
+  flex: 0 0 auto;
+  min-width: 3ch;
+  color: var(--ink-faint);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 /* The folder name is the open/close control; no separate arrow. */
 .tree-label {
   display: flex;
@@ -2062,6 +2074,27 @@ dialog.modal-upload {
 .migrate-item .pill { word-break: break-word; white-space: normal; text-align: left; }
 .migrate-item.is-error .tree-name { color: var(--fail); }
 
+/* ---------- Fixing ---------- */
+
+/* A document whose two-up PDF was already rewritten into one page per sheet,
+   on its row and counted up the folders above it. */
+.pill.fixed {
+  background: color-mix(in srgb, var(--ok) 12%, #fff);
+  color: var(--ok);
+}
+.fixed-cell:empty { display: none; }
+
+/* Fix: filled like the one destructive-looking action the panel performs,
+   and visibly busy for as long as the request it started is in flight. */
+.btn-fix { --btn-tint: var(--ok); }
+.btn-primary.btn-fix.is-loading[disabled] {
+  background: color-mix(in srgb, var(--ok) 62%, #fff);
+  color: #fff;
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--ok) 22%, transparent);
+}
+
+#fix-result .check-result { margin-bottom: 0; }
+
 /* ---------- Mapping ---------- */
 
 /* The pasted-JSON box: same chrome as the other inputs, but monospace and
@@ -2090,3 +2123,27 @@ dialog.modal-upload {
 }
 
 #check-result .check-result { margin-bottom: 0; }
+
+/* ---- Documents: the Get JSON block --------------------------------------
+   The topbar form holds the button and its spinner on one line; the result
+   card clips the mono pane so the rounded corners survive, and the pane is
+   capped so a thousand-document export scrolls inside the block instead of
+   swallowing the page. */
+#json-form { display: inline-flex; align-items: center; gap: 8px; }
+
+.json-export { margin-bottom: 16px; overflow: hidden; }
+.json-export-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-soft);
+}
+.json-export-head .btn-copy-json {
+  margin-left: auto;
+  height: 26px;
+  padding: 0 9px;
+  font-size: 11.5px;
+}
+.json-export-text { max-height: 55vh; }

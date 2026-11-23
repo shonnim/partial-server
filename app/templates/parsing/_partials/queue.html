@@ -43,7 +43,7 @@
             </span>
             <span class="gate-actions">
               {% if candidate.backend %}
-                <span class="pill backend hybrid" title="latest parse">{{ candidate.backend }}</span>
+                <span class="pill backend {{ 'vlm' if candidate.backend == 'vlm-engine' else 'hybrid' }}" title="latest parse">{{ candidate.backend }}</span>
               {% else %}
                 <span class="pill total">never parsed</span>
               {% endif %}

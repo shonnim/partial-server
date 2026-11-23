@@ -8,13 +8,18 @@ from app.db import get_db
 from app.services.documents import get_document
 from app.services.summarizing import (
     DEFAULT_LLM,
+    DEFAULT_WORKERS,
+    GROUP_SUMMARIES,
     SUMMARY_LLMS,
+    WORKER_OPTIONS,
     build_general_queue,
     build_queue,
     decorate_level,
     document_summaries,
     make_summarizer,
+    resolve_group,
     resolve_llm,
+    resolve_workers,
     summarize_document,
     summarize_document_general,
     summarize_one_header,
@@ -56,6 +61,8 @@ def summarizing_page(request: Request, db: Session = Depends(get_db)) -> HTMLRes
             "failed": failed,
             "max_batch": MAX_SUMMARIZE_BATCH,
             "llms": SUMMARY_LLMS,
+            "worker_options": WORKER_OPTIONS,
+            "summary_groups": GROUP_SUMMARIES,
             **decorate_level(db, list_level(db)),
         },
     )
@@ -85,6 +92,8 @@ def summarizing_run(
     selection: str = Form(""),
     force: bool = Form(False),
     llm: str = Form(DEFAULT_LLM),
+    workers: int = Form(DEFAULT_WORKERS),
+    group: str = Form(""),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     """Turn the selection into a queue the browser walks one document at a time.
@@ -99,14 +108,17 @@ def summarizing_run(
         )
 
     llm = resolve_llm(llm)
+    mode = resolve_group(group)
     return templates.TemplateResponse(
         request,
         "summarizing/_partials/queue.html",
         {
-            "queue": build_queue(db, doc_ids, force=force),
+            "queue": build_queue(db, doc_ids, force=force, group=mode),
             "force": force,
             "llm": llm,
             "llm_label": SUMMARY_LLMS[llm],
+            "workers": resolve_workers(workers, llm),
+            "group": mode,
         },
     )
 
@@ -117,13 +129,15 @@ def summarizing_general(
     selection: str = Form(""),
     force: bool = Form(False),
     llm: str = Form(DEFAULT_LLM),
+    group: str = Form(""),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     """The "General Summarize" queue: only the document summary is written.
 
     A selected document whose header summaries are missing is skipped with a
     pointer at the full Summarize run, which writes them and the general
-    summary in one go.
+    summary in one go. In group mode the summary comes from the group's own
+    source instead, so content rows are what qualify a document.
     """
     doc_ids, error = resolve_selection(db, selection, limit=MAX_SUMMARIZE_BATCH)
     if error:
@@ -132,15 +146,17 @@ def summarizing_general(
         )
 
     llm = resolve_llm(llm)
+    mode = resolve_group(group)
     return templates.TemplateResponse(
         request,
         "summarizing/_partials/queue.html",
         {
-            "queue": build_general_queue(db, doc_ids, force=force),
+            "queue": build_general_queue(db, doc_ids, force=force, group=mode),
             "force": force,
             "general": True,
             "llm": llm,
             "llm_label": SUMMARY_LLMS[llm],
+            "group": mode,
         },
     )
 
@@ -153,16 +169,27 @@ def summarizing_run_one(
     document_id: uuid.UUID,
     force: bool = Form(False),
     llm: str = Form(DEFAULT_LLM),
+    workers: int = Form(DEFAULT_WORKERS),
+    group: str = Form(""),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     """Summarize one document's headers.
 
     One document per request, by design: every header is a model call, and
     the browser driving the queue is what keeps a batch from being one long
-    HTTP request.
+    HTTP request. ``workers`` is how many of those calls the run keeps in
+    flight at once against the local model; ``group`` is the page's group
+    mode, which changes where the general summary comes from.
     """
     doc = _document_or_404(db, document_id)
-    result = summarize_document(db, doc, force=force, summarizer=make_summarizer(llm))
+    result = summarize_document(
+        db,
+        doc,
+        force=force,
+        summarizer=make_summarizer(llm),
+        workers=resolve_workers(workers, llm),
+        group=resolve_group(group),
+    )
 
     return templates.TemplateResponse(
         request, "summarizing/_partials/row_status.html", {"result": result}
@@ -179,12 +206,14 @@ def summarizing_general_one(
     document_id: uuid.UUID,
     force: bool = Form(False),
     llm: str = Form(DEFAULT_LLM),
+    group: str = Form(""),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    """Write one document's general summary from its stored header summaries."""
+    """Write one document's general summary from its stored header summaries —
+    or from the group mode's own source when one is picked."""
     doc = _document_or_404(db, document_id)
     result = summarize_document_general(
-        db, doc, force=force, summarizer=make_summarizer(llm)
+        db, doc, force=force, summarizer=make_summarizer(llm), group=resolve_group(group)
     )
 
     return templates.TemplateResponse(

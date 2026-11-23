@@ -1,5 +1,6 @@
 """The question-answering pipeline, with the models played by fakes."""
 
+import asyncio
 import json
 import uuid
 from collections.abc import Iterator
@@ -12,11 +13,15 @@ from app.db import get_db
 from app.llm import LLMError
 from app.main import app
 from app.models.chunk import Chunk
+from app.routers.client import _answer_stream
 from app.models.document import Document
 from app.models.header import Header, HeaderContent
 from app.services.qa import (
     NOT_FOUND_MESSAGE,
     Classification,
+    QASource,
+    ScanAnswer,
+    ScanBatch,
     StoredSummary,
     chunk_answers,
     classify_query,
@@ -30,6 +35,8 @@ from app.services.qa import (
     printed_page,
     query_pages_exist,
     requested_pages,
+    scan_batch_for_answer,
+    scan_batches,
     suggest_questions,
 )
 
@@ -385,6 +392,104 @@ def test_identify_sources_survives_a_missing_content_list() -> None:
     assert got[0].page is None
 
 
+# ---- the header scan (test-only "headers" mode) -------------------------------------
+
+
+def make_content(cid: int, header_id: int, content: str) -> HeaderContent:
+    return HeaderContent(
+        id=cid, doc_id=DOC_ID, header_id=header_id, page_idx=4, type="text",
+        content=content, bbox_0=10, bbox_1=20, bbox_2=300, bbox_3=40,
+    )
+
+
+def test_scan_batches_walks_headers_in_order_and_splits_a_long_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.services.qa.MAX_SCAN_CHARS", 10)
+    headers = [make_header(1, "서론"), make_header(2, "본론")]
+    rows = [
+        make_content(11, 1, "aaaa"),
+        make_content(12, 1, "bbbb"),
+        make_content(13, 1, "cccc"),  # pushes header 1 over 10 chars
+        make_content(14, 2, "x" * 99),  # alone over the limit: its own batch
+        HeaderContent(id=15, doc_id=DOC_ID, header_id=2, type="text", content="  "),
+    ]
+
+    got = scan_batches(StubDb(None, rows), DOC_ID, load_headers=lambda db, d: headers)
+
+    assert [(b.heading, [r.id for r in b.rows]) for b in got] == [
+        ("서론", [11, 12]),
+        ("서론", [13]),
+        ("본론", [14]),
+    ]
+
+
+def test_scan_batches_without_headers_reads_no_rows() -> None:
+    def explode(statement: object) -> StubScalars:
+        raise AssertionError("no rows query without headers")
+
+    db = StubDb(None)
+    db.scalars = explode  # type: ignore[method-assign]
+    assert scan_batches(db, DOC_ID, load_headers=lambda d, i: []) == []
+
+
+def test_scan_batch_for_answer_returns_the_answer_and_known_rows() -> None:
+    batch = ScanBatch(
+        header_id=1,
+        heading="서론",
+        rows=[make_content(11, 1, "국가채무는 2024년에 100조 원 늘어 국내총생산 대비 50%에 도달하였다")],
+    )
+    seen: dict[str, Any] = {}
+
+    def fake(**kwargs: Any) -> dict:
+        seen.update(kwargs)
+        return {"found": True, "answer": " 부채가 늘었습니다 ", "source_ids": [11, 11, 99]}
+
+    got = scan_batch_for_answer("부채는?", batch, complete_json=fake)
+
+    assert seen["schema_name"] == "header_scan"
+    assert "서론" in seen["user"] and "[id 11]" in seen["user"]
+    assert got == ScanAnswer(answer="부채가 늘었습니다", rows=[batch.rows[0]])
+
+
+def test_scan_batch_for_answer_drops_a_label_only_source() -> None:
+    main = make_content(
+        11, 1, "민간 소비는 2024년에 연 2.8% 성장하여 2000~2019년 평균치인 2.4%를 상회하였다"
+    )
+    label = make_content(12, 1, "■ (통화정책 가정)")
+    batch = ScanBatch(header_id=1, heading="본론", rows=[label, main])
+
+    got = scan_batch_for_answer(
+        "소비는?",
+        batch,
+        complete_json=lambda **k: {
+            "found": True,
+            "answer": "연 2.8% 성장하였습니다",
+            "source_ids": [12, 11],
+        },
+    )
+
+    # The label block the model named is dropped; the substantial one stays.
+    assert got is not None
+    assert [r.id for r in got.rows] == [11]
+
+
+def test_scan_batch_without_the_answer_returns_none() -> None:
+    batch = ScanBatch(header_id=1, heading="서론", rows=[make_content(11, 1, "본문")])
+
+    fake_not_found = lambda **k: {"found": False, "answer": "", "source_ids": []}  # noqa: E731
+    assert scan_batch_for_answer("질문", batch, complete_json=fake_not_found) is None
+
+    # "found" without an answer counts as not found.
+    fake_empty = lambda **k: {"found": True, "answer": "  ", "source_ids": [11]}  # noqa: E731
+    assert scan_batch_for_answer("질문", batch, complete_json=fake_empty) is None
+
+    with pytest.raises(LLMError):
+        scan_batch_for_answer(
+            "질문", batch, complete_json=lambda **k: {"found": "yes", "answer": "", "source_ids": []}
+        )
+
+
 # ---- suggested questions ----------------------------------------------------------
 
 
@@ -518,6 +623,19 @@ def sse_events(body: str) -> list[tuple[str, dict]]:
     return events
 
 
+def stream_events(stream: Any) -> list[tuple[str, dict]]:
+    """The decoded events an answer stream yields, in order.
+
+    The route is pinned to the scan pipeline while the big-prompt test runs,
+    so the retrieval pipeline's tests drive its generator directly.
+    """
+
+    async def collect() -> list[str]:
+        return [event async for event in stream]
+
+    return sse_events("".join(asyncio.run(collect())))
+
+
 def test_a_blank_query_is_422(client: TestClient) -> None:
     response = client.post(f"/document/{DOC_ID}/ask", json={"query": "   "})
     assert response.status_code == 422
@@ -529,18 +647,14 @@ def test_an_unknown_document_is_404(client: TestClient) -> None:
 
 
 def test_an_unclear_query_stops_after_the_first_step(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         "app.routers.client.classify_query",
         lambda query: Classification(query_type="unclear", search_query=query),
     )
 
-    response = client.post(f"/document/{DOC_ID}/ask", json={"query": "안녕?"})
-
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/event-stream")
-    events = sse_events(response.text)
+    events = stream_events(_answer_stream("안녕?", DOC_ID))
     assert events == [
         (
             "progress",
@@ -571,7 +685,7 @@ class StubSessionLocal:
 
 
 def test_a_summary_query_is_answered_from_the_stored_summary(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("app.routers.client.SessionLocal", StubSessionLocal)
     monkeypatch.setattr(
@@ -595,10 +709,7 @@ def test_a_summary_query_is_answered_from_the_stored_summary(
 
     monkeypatch.setattr("app.routers.client.retrieve_chunk", explode)
 
-    response = client.post(f"/document/{DOC_ID}/ask", json={"query": "이 보고서 요약해줘"})
-
-    assert response.status_code == 200
-    events = sse_events(response.text)
+    events = stream_events(_answer_stream("이 보고서 요약해줘", DOC_ID))
     assert [name for name, _ in events] == ["progress"] * 6 + ["result"]
     assert [(d["step"], d["status"]) for _, d in events[:-1]] == [
         ("question-checking", "running"),
@@ -616,7 +727,7 @@ def test_a_summary_query_is_answered_from_the_stored_summary(
 
 
 def test_a_summary_query_without_a_stored_summary_falls_through_to_retrieval(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("app.routers.client.SessionLocal", StubSessionLocal)
     monkeypatch.setattr(
@@ -631,10 +742,7 @@ def test_a_summary_query_without_a_stored_summary_falls_through_to_retrieval(
         "app.routers.client.retrieve_chunk", lambda db, *, doc_id, query: None
     )
 
-    response = client.post(f"/document/{DOC_ID}/ask", json={"query": "결론 요약해줘"})
-
-    assert response.status_code == 200
-    events = sse_events(response.text)
+    events = stream_events(_answer_stream("결론 요약해줘", DOC_ID))
     assert [(d["step"], d["status"]) for name, d in events if name == "progress"] == [
         ("question-checking", "running"),
         ("question-checking", "completed"),
@@ -647,16 +755,91 @@ def test_a_summary_query_without_a_stored_summary_falls_through_to_retrieval(
     )
 
 
-def test_a_page_beyond_the_document_stops_before_any_model_call(
+def test_headers_mode_scans_until_a_batch_answers(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    class StubSessionLocal:
-        def __enter__(self) -> StubDb:
-            return StubDb(make_document())
+    monkeypatch.setattr("app.routers.client.SessionLocal", StubSessionLocal)
+    row = make_content(11, 2, "부채가 늘었다")
+    batches = [
+        ScanBatch(header_id=1, heading="서론", rows=[make_content(10, 1, "배경")]),
+        ScanBatch(header_id=2, heading="본론", rows=[row]),
+    ]
+    monkeypatch.setattr("app.routers.client.scan_batches", lambda db, doc_id: batches)
+    monkeypatch.setattr(
+        "app.routers.client.scan_batch_for_answer",
+        lambda query, batch: (
+            ScanAnswer(answer="부채가 늘었습니다", rows=[row])
+            if batch.header_id == 2
+            else None
+        ),
+    )
+    monkeypatch.setattr(
+        "app.routers.client.suggest_questions", lambda db, doc_id: ["세출은요?"]
+    )
+    monkeypatch.setattr(
+        "app.routers.client.locate_rows",
+        lambda db, document, rows: [
+            QASource(
+                page_idx=r.page_idx,
+                page=None,
+                text=r.content or "",
+                bbox=(r.bbox_0, r.bbox_1, r.bbox_2, r.bbox_3),
+            )
+            for r in rows
+        ],
+    )
 
-        def __exit__(self, *exc: object) -> bool:
-            return False
+    def explode(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("retrieval must not run in headers mode")
 
+    monkeypatch.setattr("app.routers.client.retrieve_chunk", explode)
+    monkeypatch.setattr("app.routers.client.classify_query", explode)
+
+    # The route is pinned to the scan pipeline while the big-prompt test runs.
+    response = client.post(f"/document/{DOC_ID}/ask", json={"query": "부채는?"})
+
+    assert response.status_code == 200
+    events = sse_events(response.text)
+    assert [(d["step"], d["status"]) for name, d in events if name == "progress"] == [
+        ("question-checking", "running"),
+        ("question-checking", "completed"),
+        ("context-finding", "running"),
+        ("context-finding", "completed"),
+        ("generating", "running"),
+        ("generating", "completed"),
+    ]
+    assert events[-1][0] == "result"
+    assert events[-1][1]["answer"] == "부채가 늘었습니다"
+    assert events[-1][1]["suggested_questions"] == ["세출은요?"]
+    assert [s["text"] for s in events[-1][1]["sources"]] == ["부채가 늘었다"]
+
+
+def test_headers_mode_with_no_answering_batch_is_not_found(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.routers.client.SessionLocal", StubSessionLocal)
+    monkeypatch.setattr(
+        "app.routers.client.scan_batches",
+        lambda db, doc_id: [
+            ScanBatch(header_id=1, heading="서론", rows=[make_content(10, 1, "배경")])
+        ],
+    )
+    monkeypatch.setattr(
+        "app.routers.client.scan_batch_for_answer", lambda query, batch: None
+    )
+
+    response = client.post(f"/document/{DOC_ID}/ask", json={"query": "부채는?"})
+
+    events = sse_events(response.text)
+    assert events[-1] == (
+        "result",
+        {"answer": NOT_FOUND_MESSAGE, "sources": [], "suggested_questions": []},
+    )
+
+
+def test_a_page_beyond_the_document_stops_before_any_model_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr("app.routers.client.SessionLocal", StubSessionLocal)
     monkeypatch.setattr(
         "app.routers.client.query_pages_exist", lambda db, document, query: False
@@ -667,12 +850,7 @@ def test_a_page_beyond_the_document_stops_before_any_model_call(
 
     monkeypatch.setattr("app.routers.client.classify_query", explode)
 
-    response = client.post(
-        f"/document/{DOC_ID}/ask", json={"query": "500페이지 내용을 설명해줘"}
-    )
-
-    assert response.status_code == 200
-    events = sse_events(response.text)
+    events = stream_events(_answer_stream("500페이지 내용을 설명해줘", DOC_ID))
     assert [name for name, _ in events] == ["progress", "progress", "result"]
     assert events[-1][1] == {
         "answer": NOT_FOUND_MESSAGE,

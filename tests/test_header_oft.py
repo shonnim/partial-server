@@ -6,6 +6,7 @@ from app.services.header_extraction import ExtractedHeader, ExtractionError
 from app.services.header_oft import (
     TOC_FIRST_PAGE,
     TOC_LAST_PAGE,
+    amend_toc_oft,
     locate_toc_oft,
     page_index_ranges_oft,
     parse_toc_oft,
@@ -84,8 +85,9 @@ VIII. 미국 21
 def test_parse_toc_reads_the_real_page() -> None:
     headers = parse_toc_oft(REAL_TOC)
 
+    # Only what the TOC prints: the summary section, when the document has
+    # one, is amend_toc_oft's to add.
     assert [(h.title, h.level, h.start_page) for h in headers] == [
-        ("요약", 1, None),  # the fixed section the TOC never lists
         ("I. 국제기구", 1, 2),
         ("II. 호주", 1, 11),
         ("III. 캐 나 다", 1, 12),
@@ -107,6 +109,53 @@ def test_parse_toc_ignores_everything_that_is_not_an_entry() -> None:
 def test_parse_toc_refuses_a_page_with_no_entries() -> None:
     with pytest.raises(ExtractionError):
         parse_toc_oft("# 요 약\n\n○ 본문 문장")
+
+
+# ---- the amend hook ------------------------------------------------------------
+
+
+def test_amend_inserts_요약_when_the_page_after_the_toc_prints_it() -> None:
+    # The usual volume: the letter-spaced "요 약" title parses split into
+    # syllables on the page right after the TOC marker.
+    blocks = [
+        _text(2, "목 차"),
+        _text(3, "요", heading=True),
+        _text(3, "재정동향", heading=True),
+        _text(3, "약", heading=True),
+        _text(4, "I. 국제기구", heading=True),
+    ]
+    headers = [ExtractedHeader(title="I. 국제기구", level=1, start_page=2)]
+
+    amended = amend_toc_oft(headers, blocks)
+    assert [h.title for h in amended] == ["요약", "I. 국제기구"]
+    assert amended[0] == ExtractedHeader(title="요약", level=1, start_page=None)
+
+
+def test_amend_adds_nothing_when_the_document_has_no_summary_page() -> None:
+    # The volume that used to grow a phantom 요약 entry: no summary after the
+    # TOC, but the word 요약 appears on a body page (idx 37) — which title
+    # matching then returned as the section's whole range (37–37).
+    blocks = [
+        _text(2, "목 차"),
+        _text(3, "2016 재정동향"),  # a divider, not a summary
+        _text(4, "I. 국제기구", heading=True),
+        _text(37, "요약 및 시사점"),
+    ]
+    headers = [ExtractedHeader(title="I. 국제기구", level=1, start_page=2)]
+
+    assert amend_toc_oft(headers, blocks) == headers
+
+
+def test_amend_does_not_count_an_incidental_요약_inside_a_sentence() -> None:
+    blocks = [_text(2, "목 차"), _text(3, "이 장은 주요 내용을 요약 정리한 것임")]
+    headers = [ExtractedHeader(title="I. 개요", level=1, start_page=None)]
+    assert amend_toc_oft(headers, blocks) == headers
+
+
+def test_amend_leaves_junk_blocks_alone() -> None:
+    headers = [ExtractedHeader(title="I. 개요", level=1, start_page=None)]
+    assert amend_toc_oft(headers, None) == headers
+    assert amend_toc_oft(headers, [_text(0, "본문")]) == headers
 
 
 # ---- ranges ------------------------------------------------------------------
@@ -136,7 +185,9 @@ def test_arithmetic_starts_survive_split_headings_and_missing_numbers() -> None:
         _text(14, "캐 나 다", heading=True),
         _text(15, "본문"),
     ]
-    headers = parse_toc_oft("I. 국제기구 2\nII. 호주 11\nIII. 캐나다 12")
+    headers = amend_toc_oft(
+        parse_toc_oft("I. 국제기구 2\nII. 호주 11\nIII. 캐나다 12"), blocks
+    )
 
     assert page_index_ranges_oft(headers, blocks) == [
         (3, 3),  # 요약: the page after the TOC marker, ending before I.
@@ -216,13 +267,15 @@ def test_two_starts_on_one_page_cannot_end_an_entry_before_it_begins() -> None:
 def test_the_summary_entry_starts_on_the_page_after_the_toc() -> None:
     # The summary's own "요 약" heading parses split into syllables, so the
     # title matching can never find it; the group prints the summary on the
-    # page right after the TOC.
+    # page right after the TOC. A 요약 printed deeper in the body must not
+    # drag the entry there through title matching.
     blocks = [
         _text(2, "목 차"),
         _text(3, "요", heading=True),
         _text(3, "약", heading=True),
         _text(3, "○ 재정 수지는 흑자"),
         _text(5, "I. 개요", heading=True),
+        _text(8, "요약", heading=True),  # a body heading reusing the word
         _text(9, "본문"),
     ]
     headers = [
@@ -247,4 +300,5 @@ def test_oft1_strategy_wires_the_hooks_and_the_window() -> None:
     assert (strategy.start_page, strategy.end_page) == (TOC_FIRST_PAGE, TOC_LAST_PAGE)
     assert strategy.locate is locate_toc_oft
     assert strategy.extract is parse_toc_oft  # deterministic, no model call
+    assert strategy.amend is amend_toc_oft
     assert strategy.ranges is page_index_ranges_oft
